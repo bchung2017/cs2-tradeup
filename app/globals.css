@@ -1,0 +1,99 @@
+:root {
+  /* phosphor terminal */
+  --void: #000000;
+  --void-2: #020402;
+  --panel: #041004;
+  --line: #0d3d0d;
+  --line-bright: #145214;
+
+  --green: #33ff33;          /* primary phosphor - accents only now */
+  --green-dim: #19a019;      /* accent secondary */
+  --green-faint: #0d600d;    /* faint accent / decorative labels */
+  --green-hot: #aaffaa;      /* highlight / hit */
+
+  /* readable foreground - high-luminance, faintly green-tinted neutral */
+  --fg: #e3ebe3;             /* body text */
+  --fg-dim: #9aa89a;         /* secondary text / labels */
+  --fg-faint: #6a766a;       /* tertiary */
+
+  /* opaque panel surfaces that occlude the circuit behind the working UI */
+  --surface: #0a120a;        /* card / panel fill (near-opaque) */
+  --surface-2: #0f1a0f;      /* raised / hover */
+  --surface-line: #1f4d1f;   /* panel border - brighter so panels read as floating */
+
+  --amber: #ffc233;          /* warnings - brightened for contrast */
+  --loss: #ff6b5a;           /* loss - brightened CRT red for legibility */
+  --profit: #5cff5c;         /* profit - brightened green */
+
+  /* rarity rendered as phosphor intensity bands, not hue */
+  --rar-milspec: #19a019;
+  --rar-restricted: #33ff33;
+  --rar-classified: #aaffaa;
+  --rar-covert: #ddffdd;
+
+  --mono: "JetBrains Mono", "Cascadia Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* back-compat aliases (old names -> accessible palette) */
+  --ember: var(--green);            /* accent stays green */
+  --ember-2: var(--green-dim);
+  --cream: var(--fg);               /* body text now high-luminance neutral */
+  --cream-dim: var(--fg-dim);       /* secondary text now neutral */
+  --serif: var(--mono);
+  --panel: var(--surface);          /* filled cards opaque */
+  --void-2: var(--surface);         /* modal / raised surfaces opaque */
+  --line: var(--surface-line);      /* borders brighter so panels float */
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--void);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(51, 255, 51, 0.03) 0px,
+      rgba(51, 255, 51, 0.03) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    radial-gradient(circle at 50% 0%, rgba(51, 255, 51, 0.05), transparent 60%);
+}
+
+/* phosphor glow only where we want it - accents, not body text */
+.glow { text-shadow: 0 0 4px rgba(51, 255, 51, 0.55); }
+
+::selection { background: var(--green); color: var(--void); text-shadow: none; }
+
+.hud { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fg-dim); }
+.hud-ember { color: var(--green); }
+.hud-amber { color: var(--amber); }
+
+.bracket { position: relative; }
+.bracket::before, .bracket::after {
+  content: ""; position: absolute; width: 10px; height: 10px; border-color: var(--green); border-style: solid;
+}
+.bracket::before { top: 0; left: 0; border-width: 1px 0 0 1px; }
+.bracket::after { bottom: 0; right: 0; border-width: 0 1px 1px 0; }
+
+button {
+  font-family: var(--mono);
+  cursor: pointer;
+  transition: filter 0.12s ease, box-shadow 0.12s ease, transform 0.06s ease;
+}
+button:hover:not(:disabled) {
+  filter: brightness(1.35);
+  box-shadow: 0 0 0 1px var(--green-dim);
+}
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { cursor: not-allowed; opacity: 0.5; }
+input { font-family: var(--mono); }
+input:focus { box-shadow: 0 0 0 1px var(--green-dim); }

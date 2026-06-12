@@ -1,0 +1,110 @@
+[
+  {
+    "id": "skin-1",
+    "name": "MAG-7 | Silver",
+    "weapon": { "id": "weapon_mag7", "name": "MAG-7" },
+    "rarity": { "id": "rarity_common_weapon", "name": "Mil-Spec Grade", "color": "#4b69ff" },
+    "min_float": 0.0,
+    "max_float": 0.75,
+    "collections": [{ "id": "collection-set-dust2-2021", "name": "The Dust 2 Collection" }]
+  },
+  {
+    "id": "skin-2",
+    "name": "Five-SeveN | Withered Oak",
+    "weapon": { "id": "weapon_fiveseven", "name": "Five-SeveN" },
+    "rarity": { "id": "rarity_common_weapon", "name": "Mil-Spec Grade", "color": "#4b69ff" },
+    "min_float": 0.0,
+    "max_float": 1.0,
+    "collections": [{ "id": "collection-set-dust2-2021", "name": "The Dust 2 Collection" }]
+  },
+  {
+    "id": "skin-3",
+    "name": "MP9 | Featherweight",
+    "weapon": { "id": "weapon_mp9", "name": "MP9" },
+    "rarity": { "id": "rarity_common_weapon", "name": "Mil-Spec Grade", "color": "#4b69ff" },
+    "min_float": 0.0,
+    "max_float": 0.6,
+    "collections": [{ "id": "collection-set-dust2-2021", "name": "The Dust 2 Collection" }]
+  },
+  {
+    "id": "skin-4",
+    "name": "Glock-18 | Sand Dune",
+    "weapon": { "id": "weapon_glock", "name": "Glock-18" },
+    "rarity": { "id": "rarity_rare_weapon", "name": "Restricted", "color": "#8847ff" },
+    "min_float": 0.06,
+    "max_float": 0.8,
+    "collections": [{ "id": "collection-set-dust2-2021", "name": "The Dust 2 Collection" }]
+  },
+  {
+    "id": "skin-5",
+    "name": "AWP | Safari Mesh",
+    "weapon": { "id": "weapon_awp", "name": "AWP" },
+    "rarity": { "id": "rarity_rare_weapon", "name": "Restricted", "color": "#8847ff" },
+    "min_float": 0.06,
+    "max_float": 0.8,
+    "collections": [{ "id": "collection-set-dust2-2021", "name": "The Dust 2 Collection" }]
+  },
+  {
+    "id": "skin-6",
+    "name": "P250 | Sand Dune",
+    "weapon": { "id": "weapon_p250", "name": "P250" },
+    "rarity": { "id": "rarity_common_weapon", "name": "Mil-Spec Grade", "color": "#4b69ff" },
+    "min_float": 0.0,
+    "max_float": 0.5,
+    "collections": [{ "id": "collection-set-dust2-2021", "name": "The Dust 2 Collection" }]
+  },
+  {
+    "id": "skin-7",
+    "name": "Sawed-Off | Snake Camo",
+    "weapon": { "id": "weapon_sawedoff", "name": "Sawed-Off" },
+    "rarity": { "id": "rarity_rare_weapon", "name": "Restricted", "color": "#8847ff" },
+    "min_float": 0.06,
+    "max_float": 0.8,
+    "collections": [{ "id": "collection-set-dust2-2021", "name": "The Dust 2 Collection" }]
+  },
+  {
+    "id": "skin-8",
+    "name": "Nova | Predator",
+    "weapon": { "id": "weapon_nova", "name": "Nova" },
+    "rarity": { "id": "rarity_common_weapon", "name": "Mil-Spec Grade", "color": "#4b69ff" },
+    "min_float": 0.0,
+    "max_float": 0.7,
+    "collections": [{ "id": "collection-set-dust2-2021", "name": "The Dust 2 Collection" }]
+  },
+  {
+    "id": "skin-m1",
+    "name": "MP7 | Gunsmoke",
+    "weapon": { "id": "weapon_mp7", "name": "MP7" },
+    "rarity": { "id": "rarity_common_weapon", "name": "Mil-Spec Grade", "color": "#4b69ff" },
+    "min_float": 0.0,
+    "max_float": 0.65,
+    "collections": [{ "id": "collection-set-mirage-2021", "name": "The Mirage Collection" }]
+  },
+  {
+    "id": "skin-m2",
+    "name": "Galil AR | Sandstorm",
+    "weapon": { "id": "weapon_galilar", "name": "Galil AR" },
+    "rarity": { "id": "rarity_common_weapon", "name": "Mil-Spec Grade", "color": "#4b69ff" },
+    "min_float": 0.0,
+    "max_float": 0.8,
+    "collections": [{ "id": "collection-set-mirage-2021", "name": "The Mirage Collection" }]
+  },
+  {
+    "id": "skin-m3",
+    "name": "Desert Eagle | Mudder",
+    "weapon": { "id": "weapon_deagle", "name": "Desert Eagle" },
+    "rarity": { "id": "rarity_rare_weapon", "name": "Restricted", "color": "#8847ff" },
+    "min_float": 0.0,
+    "max_float": 0.8,
+    "collections": [{ "id": "collection-set-mirage-2021", "name": "The Mirage Collection" }]
+  },
+  {
+    "id": "skin-m4",
+    "name": "AK-47 | Predator",
+    "weapon": { "id": "weapon_ak47", "name": "AK-47" },
+    "rarity": { "id": "rarity_rare_weapon", "name": "Restricted", "color": "#8847ff" },
+    "min_float": 0.0,
+    "max_float": 0.5,
+    "collections": [{ "id": "collection-set-mirage-2021", "name": "The Mirage Collection" }]
+  }
+]

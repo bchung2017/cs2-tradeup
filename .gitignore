@@ -1,0 +1,16 @@
+node_modules/
+.next/
+*.log
+loader.db
+loader.db-shm
+loader.db-wal
+
+# build artifacts
+*.tsbuildinfo
+
+# bundled Claude Code (not part of this app)
+cc.tar.gz
+claude-code-main/
+
+# malformed dir from a botched command
+{types,lib,app,components,scripts,public/
