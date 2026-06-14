@@ -15,12 +15,15 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "bad json" }, { status: 400 });
   }
+  console.log(`[resolve] input=${JSON.stringify(body.input ?? "")}`);
   try {
     const steamid = await resolveSteamId(body.input || "");
+    console.log(`[resolve] -> steamid=${steamid}`);
     return NextResponse.json({ steamid });
   } catch (e) {
     const err = e as SteamError;
     const status = err.code === "RESOLVE" ? 404 : 502;
+    console.warn(`[resolve] FAILED code=${err.code} msg=${err.message}`);
     return NextResponse.json({ code: err.code || "UPSTREAM", error: err.message }, { status });
   }
 }

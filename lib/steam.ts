@@ -12,6 +12,7 @@
 // globalThis so dev HMR doesn't open the database twice.
 
 import Database from "better-sqlite3";
+import { decodeLink } from "@csfloat/cs2-inspect-serializer";
 import { statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -25,10 +26,17 @@ export interface InventoryItem {
   // (deep) sync and merged in at read time from the item_meta table. All
   // optional so existing snapshots and the basic flow are unaffected.
   inspect_url?: string | null;
+  // Decoded locally at sync time from a self-encoding (masked) inspect link via
+  // @csfloat/cs2-inspect-serializer — no network, no rate limit. Null when the
+  // link can't be decoded (Steam's `%propid:6%` placeholder, referential S/A/D
+  // links, or non-skins all carry no embedded data).
   float?: number | null;
   paint_seed?: number | null;
   paint_index?: number | null;
   meta_fetched_at?: number | null;
+  // Median market price, resolved at read time from the price table by market
+  // name + wear (see priceForMarketName). Null for items with no priced wear.
+  price?: number | null;
 }
 
 interface SnapshotPayload {
@@ -52,31 +60,12 @@ export interface ItemMeta {
   fetched_at: number;
 }
 
-// A persistent per-item (deep) sync job. The item_meta table is the real ledger
-// of progress; this row only holds control intent + display counters.
-export interface DeepSyncJob {
-  steamid: string;
-  status: string; // 'running' | 'paused' | 'stopped' | 'done' | 'error'
-  total: number;
-  done: number;
-  error: string | null;
-  started_at: number;
-  updated_at: number; // heartbeat
-}
-
 interface SteamStore {
   db: Database.Database;
   upsertSnap: Database.Statement;
   getSnap: Database.Statement;
-  upsertMeta: Database.Statement;
-  upsertJob: Database.Statement;
-  getJob: Database.Statement;
-  bumpJob: Database.Statement;
-  touchJob: Database.Statement;
-  finishJob: Database.Statement;
   lastSync: Map<string, number>; // steamid -> ms
   inflight: Set<string>;
-  deepInflight: Set<string>; // one deep-sync worker per steamid per process
 }
 
 declare global {
@@ -99,34 +88,17 @@ function initStore(): SteamStore {
       paint_index INTEGER,
       fetched_at INTEGER NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS deep_sync_jobs (
-      steamid TEXT PRIMARY KEY,
-      status TEXT NOT NULL,
-      total INTEGER NOT NULL,
-      done INTEGER NOT NULL,
-      error TEXT,
-      started_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );`);
+    -- The standalone deep-sync float resolver is gone: floats are now decoded
+    -- locally at sync time. Drop the obsolete job table (and any stale rows).
+    DROP TABLE IF EXISTS deep_sync_jobs;`);
   return {
     db,
     upsertSnap: db.prepare(
       "INSERT INTO snapshots(steamid,fetched_at,payload) VALUES(?,?,?) ON CONFLICT(steamid) DO UPDATE SET fetched_at=excluded.fetched_at, payload=excluded.payload",
     ),
     getSnap: db.prepare("SELECT fetched_at, payload FROM snapshots WHERE steamid=?"),
-    upsertMeta: db.prepare(
-      "INSERT INTO item_meta(assetid,float,paint_seed,paint_index,fetched_at) VALUES(?,?,?,?,?) ON CONFLICT(assetid) DO UPDATE SET float=excluded.float, paint_seed=excluded.paint_seed, paint_index=excluded.paint_index, fetched_at=excluded.fetched_at",
-    ),
-    upsertJob: db.prepare(
-      "INSERT INTO deep_sync_jobs(steamid,status,total,done,error,started_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(steamid) DO UPDATE SET status=excluded.status, total=excluded.total, done=excluded.done, error=excluded.error, started_at=excluded.started_at, updated_at=excluded.updated_at",
-    ),
-    getJob: db.prepare("SELECT * FROM deep_sync_jobs WHERE steamid=?"),
-    bumpJob: db.prepare("UPDATE deep_sync_jobs SET done=done+1, updated_at=? WHERE steamid=?"),
-    touchJob: db.prepare("UPDATE deep_sync_jobs SET status=?, updated_at=? WHERE steamid=?"),
-    finishJob: db.prepare("UPDATE deep_sync_jobs SET status=?, error=?, updated_at=? WHERE steamid=?"),
     lastSync: new Map(),
     inflight: new Set(),
-    deepInflight: new Set(),
   };
 }
 
@@ -172,10 +144,14 @@ export async function resolveSteamId(raw: string): Promise<string> {
 
 export async function fetchInventory(steamid: string): Promise<InventoryItem[]> {
   // CS2 = appid 730, context 2. Steam community endpoint; Referer matters.
-  const url = `https://steamcommunity.com/inventory/${steamid}/730/2?l=english&count=2000`;
+  // raw_asset_properties=1 makes Steam include the per-item float/seed (the
+  // "Wear Rating" / "Pattern Template" the web inventory UI shows) in a top-level
+  // `asset_properties` array — public, no auth, no inspect, no bot.
+  const url = `https://steamcommunity.com/inventory/${steamid}/730/2?l=english&count=2000&preserve_bbcode=1&raw_asset_properties=1`;
   const r = await fetch(url, {
     headers: { Referer: `https://steamcommunity.com/profiles/${steamid}/inventory` },
   });
+  console.log(`[steam] GET inventory ${steamid} (raw_asset_properties=1) -> HTTP ${r.status}`);
   if (r.status === 429) throw new SteamError("RATELIMIT", "steam 429");
   if (r.status === 403) throw new SteamError("PRIVATE", "inventory private");
   if (!r.ok) throw new SteamError("UPSTREAM", `http ${r.status}`);
@@ -185,16 +161,45 @@ export async function fetchInventory(steamid: string): Promise<InventoryItem[]> 
   const descByKey = new Map<string, any>();
   for (const d of j.descriptions || []) descByKey.set(`${d.classid}_${d.instanceid}`, d);
 
-  return j.assets.map((a: any): InventoryItem => {
+  // Map assetid -> { float, paint_seed } from the asset_properties array.
+  // propertyid 1 = paint seed (pattern), 2 = paintwear (the float), 6 = item hash.
+  const propsByAsset = new Map<string, { float: number | null; paint_seed: number | null }>();
+  for (const e of j.asset_properties || []) {
+    let float: number | null = null;
+    let paint_seed: number | null = null;
+    for (const p of e.asset_properties || []) {
+      if (p.propertyid === 2 && p.float_value != null) float = Number(p.float_value);
+      else if (p.propertyid === 1 && p.int_value != null) paint_seed = Number(p.int_value);
+    }
+    propsByAsset.set(String(e.assetid), { float, paint_seed });
+  }
+
+  const items: InventoryItem[] = j.assets.map((a: any): InventoryItem => {
     const d = descByKey.get(`${a.classid}_${a.instanceid}`) || {};
     const tags = d.tags || [];
     const rarity = (tags.find((t: any) => t.category === "Rarity") || {}).localized_tag_name;
-    // The "Inspect in Game" action carries the inspect link with %owner_steamid%
-    // / %assetid% placeholders. Capturing it now is free; a deep sync resolves it
-    // later for float/paint. (Not every item has one — stickers, cases, etc.)
+    // Inspect link still captured for reference; for CS2 it's the data-less
+    // `%propid:6%` macro now, so the real float comes from asset_properties.
     const action = (d.actions || []).find((x: any) => /Inspect/i.test(x.name));
     const inspect_url: string | null =
       action?.link?.replace("%owner_steamid%", steamid).replace("%assetid%", a.assetid) ?? null;
+
+    // Primary: per-item float/seed from asset_properties (public, no inspect).
+    // Fallback: decode a masked inspect link if one is ever present (e.g. a
+    // market-listing link or a link pasted by the user).
+    const props = propsByAsset.get(String(a.assetid));
+    let float = props?.float ?? null;
+    let paint_seed = props?.paint_seed ?? null;
+    let paint_index: number | null = null;
+    if (float == null) {
+      const decoded = decodeInspect(inspect_url);
+      if (decoded) {
+        float = decoded.float;
+        paint_seed = paint_seed ?? decoded.paint_seed;
+        paint_index = decoded.paint_index;
+      }
+    }
+
     return {
       assetid: a.assetid,
       classid: a.classid,
@@ -204,8 +209,35 @@ export async function fetchInventory(steamid: string): Promise<InventoryItem[]> 
         : null,
       rarity: rarity || null,
       inspect_url,
+      float,
+      paint_seed,
+      paint_index,
+      meta_fetched_at: float != null ? Date.now() : null,
     };
   });
+  const withFloat = items.filter((i) => i.float != null).length;
+  console.log(`[steam] parsed ${items.length} assets, ${withFloat} with float`);
+  return items;
+}
+
+// Decode an inspect link to float/paint with zero network calls. Self-encoding
+// (masked) links embed the item data; @csfloat/cs2-inspect-serializer unpacks
+// it. Anything else — Steam's `%propid:6%` macro, referential S/A/D links, or a
+// missing link — throws inside decodeLink and we return null.
+function decodeInspect(
+  link: string | null,
+): { float: number | null; paint_seed: number | null; paint_index: number | null } | null {
+  if (!link) return null;
+  try {
+    const d = decodeLink(link);
+    return {
+      float: typeof d.paintwear === "number" ? d.paintwear : null,
+      paint_seed: typeof d.paintseed === "number" ? d.paintseed : null,
+      paint_index: typeof d.paintindex === "number" ? d.paintindex : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // Enforces the 60s floor + inflight guard, fetches, and writes the snapshot
@@ -276,139 +308,26 @@ export function getSnapshot(steamid: string): Snapshot | undefined {
   if (!row) return undefined;
   const payload = JSON.parse(row.payload) as SnapshotPayload;
 
-  // Merge in any per-item metadata captured by a deep sync. Items with no meta
-  // row are returned unchanged, so this degrades gracefully to today's behavior.
+  // Legacy fill: older snapshots resolved floats into the separate item_meta
+  // table. Floats are now decoded into the payload at sync time, so the payload
+  // value wins; item_meta only backfills assets a fresh sync hasn't covered yet.
   const byId = getMetaForAssets(
     store,
     payload.items.map((i) => i.assetid),
   );
   const items = payload.items.map((i) => {
     const m = byId.get(i.assetid);
-    return m
-      ? {
-          ...i,
-          float: m.float,
-          paint_seed: m.paint_seed,
-          paint_index: m.paint_index,
-          meta_fetched_at: m.fetched_at,
-        }
-      : i;
+    if (!m) return i;
+    return {
+      ...i,
+      float: i.float ?? m.float,
+      paint_seed: i.paint_seed ?? m.paint_seed,
+      paint_index: i.paint_index ?? m.paint_index,
+      meta_fetched_at: i.meta_fetched_at ?? m.fetched_at,
+    };
   });
 
   return { fetchedAt: row.fetched_at, items, count: payload.count };
-}
-
-// ---------------------------------------------------------------------------
-// Deep-sync job control (the engine itself lands in a later phase).
-// ---------------------------------------------------------------------------
-
-export function getJob(steamid: string): DeepSyncJob | undefined {
-  return getStore().getJob.get(steamid) as DeepSyncJob | undefined;
-}
-
-export type JobControl = "pause" | "stop" | "resume";
-
-// Maps a control action onto the job's status (+ heartbeat). Returns the updated
-// row, or undefined if there is no job to control.
-export function controlJob(steamid: string, action: JobControl): DeepSyncJob | undefined {
-  const store = getStore();
-  const existing = store.getJob.get(steamid) as DeepSyncJob | undefined;
-  if (!existing) return undefined;
-  const status = action === "resume" ? "running" : action === "pause" ? "paused" : "stopped";
-  store.touchJob.run(status, Date.now(), steamid);
-  return store.getJob.get(steamid) as DeepSyncJob | undefined;
-}
-
-// ---------------------------------------------------------------------------
-// Deep-sync engine — resolves per-item float/paint via inspect links.
-// ---------------------------------------------------------------------------
-
-const THROTTLE_MS = 1500; // gap between per-item lookups (be gentle to the float source)
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms));
-}
-
-export interface ResolvedMeta {
-  float: number | null;
-  paint_seed: number | null;
-  paint_index: number | null;
-}
-
-// The single float-source abstraction. Default impl hits the CSFloat API; swap
-// this body for a self-hosted node-globaloffensive inspect bot to drop the
-// third-party rate limit. Needs CSFLOAT_API_KEY for authenticated throughput.
-async function resolveFloat(inspectUrl: string): Promise<ResolvedMeta> {
-  const KEY = process.env.CSFLOAT_API_KEY;
-  const url = `https://api.csgofloat.com/?url=${encodeURIComponent(inspectUrl)}`;
-  const r = await fetch(url, KEY ? { headers: { Authorization: KEY } } : undefined);
-  if (r.status === 429) throw new SteamError("RATELIMIT", "csfloat 429");
-  if (!r.ok) throw new SteamError("UPSTREAM", `csfloat http ${r.status}`);
-  const j = await r.json();
-  const info = j.iteminfo || {};
-  return {
-    float: typeof info.floatvalue === "number" ? info.floatvalue : null,
-    paint_seed: typeof info.paintseed === "number" ? info.paintseed : null,
-    paint_index: typeof info.paintindex === "number" ? info.paintindex : null,
-  };
-}
-
-export type DeepSyncEvent =
-  | { type: "start"; total: number }
-  | { type: "item"; assetid: string; float: number | null; done: number; total: number }
-  | { type: "halted"; status: string }
-  | { type: "error"; error: string }
-  | { type: "done"; done: number; total: number };
-
-// Async generator that walks the snapshot's inspectable, not-yet-resolved items,
-// writing each float to item_meta (the durable ledger) as it goes. Re-reads the
-// job row every iteration so pause/stop/abort halt cleanly; skipping already-
-// cached floats makes resume free. One worker per steamid per process.
-export async function* deepSyncInventory(
-  steamid: string,
-  signal?: AbortSignal,
-): AsyncGenerator<DeepSyncEvent> {
-  const store = getStore();
-  if (store.deepInflight.has(steamid)) throw new SteamError("INFLIGHT", "deep sync in progress");
-  store.deepInflight.add(steamid);
-  try {
-    const snap = getSnapshot(steamid);
-    const todo = (snap?.items ?? []).filter((i) => i.inspect_url && i.float == null);
-    const total = todo.length;
-    const now = Date.now();
-    store.upsertJob.run(steamid, "running", total, 0, null, now, now);
-    yield { type: "start", total };
-
-    let done = 0;
-    for (const item of todo) {
-      const job = store.getJob.get(steamid) as DeepSyncJob | undefined;
-      if (signal?.aborted || !job || job.status !== "running") {
-        if (job && job.status === "running") store.touchJob.run("paused", Date.now(), steamid);
-        yield { type: "halted", status: signal?.aborted ? "aborted" : (job?.status ?? "missing") };
-        return;
-      }
-
-      let resolved: ResolvedMeta;
-      try {
-        resolved = await resolveFloat(item.inspect_url as string);
-      } catch (e) {
-        const msg = (e as Error).message;
-        store.finishJob.run("error", msg, Date.now(), steamid);
-        yield { type: "error", error: msg };
-        return;
-      }
-      store.upsertMeta.run(item.assetid, resolved.float, resolved.paint_seed, resolved.paint_index, Date.now());
-      done++;
-      store.bumpJob.run(Date.now(), steamid);
-      yield { type: "item", assetid: item.assetid, float: resolved.float, done, total };
-      await sleep(THROTTLE_MS);
-    }
-
-    store.finishJob.run("done", null, Date.now(), steamid);
-    yield { type: "done", done, total };
-  } finally {
-    store.deepInflight.delete(steamid);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -551,8 +470,8 @@ export interface ClearResult {
 
 /**
  * Force-clears the persistent cache. With a `steamid`, clears only that
- * profile's snapshot, its per-item float/paint meta, and its deep-sync job;
- * with no argument, wipes everything. Also resets the in-memory sync guards so
+ * profile's snapshot and any legacy per-item float/paint meta; with no argument,
+ * wipes everything. Also resets the in-memory sync guards so
  * a fresh sync right after a clear isn't blocked by the 60s floor or a stale
  * inflight flag. The loader.db file itself is kept (rows are deleted, not the DB).
  */
@@ -584,7 +503,6 @@ export function clearCache(steamid?: string): ClearResult {
     const jobs = hasJobs ? db.prepare("DELETE FROM deep_sync_jobs WHERE steamid=?").run(steamid).changes : 0;
     store.lastSync.delete(steamid);
     store.inflight.delete(steamid);
-    store.deepInflight.delete(steamid);
     return { snapshots, meta, jobs };
   }
 
@@ -593,6 +511,5 @@ export function clearCache(steamid?: string): ClearResult {
   const jobs = hasJobs ? db.prepare("DELETE FROM deep_sync_jobs").run().changes : 0;
   store.lastSync.clear();
   store.inflight.clear();
-  store.deepInflight.clear();
   return { snapshots, meta, jobs };
 }

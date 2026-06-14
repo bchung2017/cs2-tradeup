@@ -14,18 +14,55 @@ export const makeSlots = (n: number): Slot[] =>
   Array.from({ length: n }, () => ({ skin: null, float: 0, stattrak: false }));
 
 // Standard contract = 10 inputs; knife contract = 5.
-export const EMPTY_SLOTS: Slot[] = makeSlots(10);
+const STANDARD_COUNT = 10;
+const KNIFE_COUNT = 5;
+export const EMPTY_SLOTS: Slot[] = makeSlots(STANDARD_COUNT);
 
 // True when a market name carries the StatTrak™ marker.
 export function isStatTrakName(name: string | null | undefined): boolean {
   return /StatTrak/i.test(name ?? "");
 }
 
+// CS2 knife base names. Inventory knives are ★-marked and their weapon segment
+// is one of these; gloves are also ★-marked but won't match, so they stay ×10.
+const KNIFE_BASE_NAMES = new Set([
+  "Bayonet", "Bowie Knife", "Butterfly Knife", "Classic Knife", "Falchion Knife",
+  "Flip Knife", "Gut Knife", "Huntsman Knife", "Karambit", "Kukri Knife",
+  "M9 Bayonet", "Navaja Knife", "Nomad Knife", "Paracord Knife", "Shadow Daggers",
+  "Skeleton Knife", "Stiletto Knife", "Survival Knife", "Talon Knife", "Ursus Knife",
+]);
+
+// Detect a knife from the raw inventory market name (e.g. "★ Karambit | Doppler").
+function isKnifeMarketName(name: string | null | undefined): boolean {
+  if (!name || !name.includes("★")) return false;
+  const weapon = name
+    .replace(/^★\s*/, "")
+    .replace(/^StatTrak™?\s*/i, "")
+    .split(" | ")[0]
+    .trim();
+  return KNIFE_BASE_NAMES.has(weapon);
+}
+
+export function isKnifeSkin(skin: Skin | null | undefined): boolean {
+  return !!skin?.isKnife;
+}
+
+// Contract size derives from the first staged item: a knife forces ×5, anything
+// else (or an empty grid) stays ×10. Resizing preserves staged items in order.
+function sizedForFirst(slots: Slot[]): Slot[] {
+  const first = slots.find((s) => s.skin);
+  const target = first?.skin && isKnifeSkin(first.skin) ? KNIFE_COUNT : STANDARD_COUNT;
+  if (slots.length === target) return slots;
+  const filled = slots.filter((s) => s.skin).slice(0, target);
+  const out = makeSlots(target);
+  for (let i = 0; i < filled.length; i++) out[i] = filled[i];
+  return out;
+}
+
 interface TradeupCtx {
   slots: Slot[];
   setSlots: React.Dispatch<React.SetStateAction<Slot[]>>;
-  count: number; // 10 (standard) or 5 (knife) — switching clears the staging area
-  setCount: (n: number) => void;
+  count: number; // auto-derived grid size: 5 when a knife leads, else 10
   // Drops an inventory item into the next empty slot. Respects the rarity + StatTrak lock.
   addFromInventory: (item: InventoryItem) => { ok: boolean; reason?: string };
   // The currently loaded profile's steamid64, mirrored from the inventory side so
@@ -65,21 +102,27 @@ function skinFromInventory(item: InventoryItem): Skin {
     max_float: 1,
     collections: [],
     image: item.icon_url ?? undefined,
+    isKnife: isKnifeMarketName(item.name),
   };
 }
 
 export function TradeupProvider({ children }: { children: React.ReactNode }) {
-  const [count, setCountState] = useState(10);
-  const [slots, setSlots] = useState<Slot[]>(() => makeSlots(10));
+  const [slots, setSlotsRaw] = useState<Slot[]>(() => makeSlots(STANDARD_COUNT));
   const [steamid, setSteamid] = useState<string | null>(null);
   const slotsRef = useRef(slots);
   slotsRef.current = slots;
 
-  // Switching contract size resets staging — inputs must share one rarity & size.
-  const setCount = useCallback((n: number) => {
-    setCountState(n);
-    setSlots(makeSlots(n));
+  // Every slot update is auto-sized: ×5 when a knife leads, else ×10. This
+  // replaces the old manual standard/knife toggle — the grid converts itself.
+  const setSlots = useCallback<React.Dispatch<React.SetStateAction<Slot[]>>>((action) => {
+    setSlotsRaw((prev) => {
+      const next = typeof action === "function" ? (action as (p: Slot[]) => Slot[])(prev) : action;
+      return sizedForFirst(next);
+    });
   }, []);
+
+  // Contract size is purely derived from the (already auto-sized) grid.
+  const count = slots.length;
 
   const addFromInventory = useCallback((item: InventoryItem) => {
     const prev = slotsRef.current;
@@ -100,13 +143,13 @@ export function TradeupProvider({ children }: { children: React.ReactNode }) {
     // Use the real per-item float once a deep sync has populated it; otherwise
     // fall back to the skin's min (synthetic until floats are resolved).
     next[idx] = { skin, float: item.float ?? skin.min_float, stattrak };
-    setSlots(next);
+    setSlots(next); // auto-sizes to ×5 when this knife is the leading item
     return { ok: true };
-  }, []);
+  }, [setSlots]);
 
   const value = useMemo(
-    () => ({ slots, setSlots, count, setCount, addFromInventory, steamid, setSteamid }),
-    [slots, count, setCount, addFromInventory, steamid],
+    () => ({ slots, setSlots, count, addFromInventory, steamid, setSteamid }),
+    [slots, count, setSlots, addFromInventory, steamid],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

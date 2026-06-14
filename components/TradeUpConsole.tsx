@@ -5,10 +5,10 @@ import CircuitBoard from "@/components/CircuitBoard";
 import SkinPicker from "@/components/SkinPicker";
 import { oddsString, rarityColor, rarityHex, signedUsd, usd } from "@/lib/display";
 import { makeSlots, useTradeup } from "@/lib/tradeup-context";
-import type { Rarity, Skin, TradeupResult } from "@/types/cs2";
+import type { Rarity, Skin, TradeupOutcome, TradeupResult } from "@/types/cs2";
 
 export default function TradeUpConsole() {
-  const { slots, setSlots, count, setCount } = useTradeup();
+  const { slots, setSlots, count } = useTradeup();
   const [pickerFor, setPickerFor] = useState<number | null>(null);
   const [result, setResult] = useState<TradeupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -132,29 +132,13 @@ export default function TradeUpConsole() {
           </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-          {/* contract size — standard (10) or knife (5). Locked once staging starts. */}
+          {/* contract size auto-derives from the first staged item: a knife → ×5,
+              anything else (or empty) → ×10. No manual toggle. */}
           <div className="hud" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span>MODE</span>
-            {([["STANDARD ×10", 10], ["KNIFE ×5", 5]] as const).map(([label, n]) => (
-              <button
-                key={n}
-                onClick={() => {
-                  setCount(n);
-                  setResult(null);
-                }}
-                disabled={filled > 0}
-                style={{
-                  background: count === n ? "var(--ember)" : "transparent",
-                  color: count === n ? "var(--void)" : "var(--cream-dim)",
-                  border: "1px solid var(--line)",
-                  padding: "5px 9px",
-                  fontSize: 10,
-                  letterSpacing: "0.1em",
-                }}
-              >
-                {label}
-              </button>
-            ))}
+            <span>CONTRACT</span>
+            <span style={{ color: "var(--ember)" }}>
+              {count === 5 ? "KNIFE ×5" : "STANDARD ×10"}
+            </span>
           </div>
           {isStatTrak && (
             <span className="hud" style={{ color: "var(--ember)" }}>
@@ -267,6 +251,19 @@ export default function TradeUpConsole() {
                     outline: "none",
                   }}
                 />
+                <div
+                  title="exact float"
+                  style={{
+                    fontSize: 9,
+                    color: "var(--cream-dim)",
+                    fontFamily: "var(--mono)",
+                    wordBreak: "break-all",
+                    lineHeight: 1.25,
+                    marginTop: 3,
+                  }}
+                >
+                  {String(slot.float)}
+                </div>
               </>
             ) : (
               <button
@@ -305,7 +302,8 @@ export default function TradeUpConsole() {
         </button>
         <button
           onClick={() => {
-            setSlots(makeSlots(count));
+            // Reset to an empty standard grid; it re-derives to ×5 if a knife leads.
+            setSlots(makeSlots(10));
             setResult(null);
             setError(null);
           }}
@@ -480,75 +478,190 @@ function Outcomes({ result }: { result: TradeupResult }) {
 
       <ResultViz result={result} />
 
-      <table style={{ width: "100%", marginTop: 22, borderCollapse: "collapse", fontSize: 12 }}>
-        <thead>
-          <tr style={{ borderBottom: "1px solid var(--line)" }}>
-            {["OUTCOME", "WEAR / FLOAT", "HIT", "ODDS", "PRICE", "IF YOU LAND", "ROI"].map((h) => (
-              <th
-                key={h}
-                className="hud"
-                style={{ textAlign: h === "OUTCOME" ? "left" : "right", padding: "8px 6px" }}
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {result.outcomes.map((o, idx) => {
-            const land = o.estimatedPrice != null ? o.estimatedPrice - result.inputCost : null;
-            const roi =
-              o.estimatedPrice != null && result.inputCost > 0
-                ? ((o.estimatedPrice - result.inputCost) / result.inputCost) * 100
-                : null;
-            return (
-              <tr key={`${o.skin.id}-${o.outputWear}`} style={{ borderBottom: "1px solid var(--line)" }}>
-                <td style={{ padding: "9px 6px" }}>
-                  <span style={{ color: "var(--cream-dim)", fontSize: 10 }}>{o.skin.weapon.name}</span>
-                  <br />
-                  {o.skin.name}
-                  {idx === 0 && (
-                    <span className="hud hud-ember" style={{ marginLeft: 8 }}>
-                      MOST LIKELY
-                    </span>
-                  )}
-                </td>
-                <td style={{ textAlign: "right", padding: "9px 6px" }}>
-                  {o.outputWear}
-                  <br />
-                  <span className="hud">{o.outputFloat.toFixed(4)}</span>
-                </td>
-                <td style={{ textAlign: "right", padding: "9px 6px" }}>
-                  {(o.probability * 100).toFixed(1)}%
-                </td>
-                <td style={{ textAlign: "right", padding: "9px 6px", color: "var(--cream-dim)" }}>
-                  {oddsString(o.probability)}
-                </td>
-                <td style={{ textAlign: "right", padding: "9px 6px" }}>{usd(o.estimatedPrice)}</td>
-                <td
-                  style={{
-                    textAlign: "right",
-                    padding: "9px 6px",
-                    color: land == null ? "var(--cream-dim)" : land >= 0 ? "var(--profit)" : "var(--loss)",
-                  }}
-                >
-                  {land == null ? "—" : signedUsd(land)}
-                </td>
-                <td
-                  style={{
-                    textAlign: "right",
-                    padding: "9px 6px",
-                    color: roi == null ? "var(--cream-dim)" : roi >= 0 ? "var(--profit)" : "var(--loss)",
-                  }}
-                >
-                  {roi == null ? "—" : `${roi >= 0 ? "+" : ""}${roi.toFixed(0)}%`}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div
+        className="hud"
+        style={{
+          marginTop: 20,
+          paddingTop: 16,
+          borderTop: "1px solid var(--line)",
+          display: "flex",
+          justifyContent: "space-between",
+        }}
+      >
+        <span>POSSIBLE OUTCOMES</span>
+        <span className="hud-ember">{result.outcomes.length} ITEMS</span>
+      </div>
+
+      {/* Outcome grid — one card per possible item, ordered most→least likely.
+          The swatch on each card matches that item's donut slice above. */}
+      <div
+        style={{
+          marginTop: 8,
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
+          gap: 5,
+        }}
+      >
+        {result.outcomes.map((o, idx) => (
+          <OutcomeCard
+            key={`${o.skin.id}-${o.outputWear}`}
+            o={o}
+            idx={idx}
+            inputCost={result.inputCost}
+            color={PIE_COLORS[idx % PIE_COLORS.length]}
+          />
+        ))}
+      </div>
     </section>
+  );
+}
+
+// One outcome rendered as a picture card. Carries every field the old table row
+// held: weapon + name, MOST-LIKELY flag, wear/float, hit %, odds, price, the
+// profit/loss if you land it, and ROI. The color swatch ties back to the donut.
+// Map an outcome's ROI to a red→yellow→green spectrum, yellow at break-even.
+// −100% (wipeout) → red, 0% → yellow, +100% or better → green; clamped past ±100%.
+function roiColor(roi: number | null): string {
+  if (roi == null) return "var(--cream-dim)";
+  const t = Math.max(-1, Math.min(1, roi / 100));
+  const hue = 60 + t * 60; // 0 red · 60 yellow · 120 green
+  return `hsl(${Math.round(hue)}, 85%, 58%)`;
+}
+
+function OutcomeCard({
+  o,
+  idx,
+  inputCost,
+  color,
+}: {
+  o: TradeupOutcome;
+  idx: number;
+  inputCost: number;
+  color: string;
+}) {
+  const land = o.estimatedPrice != null ? o.estimatedPrice - inputCost : null;
+  const roi =
+    o.estimatedPrice != null && inputCost > 0
+      ? ((o.estimatedPrice - inputCost) / inputCost) * 100
+      : null;
+  const rarity = rarityHex(o.skin.rarity.name);
+  const spectrum = roiColor(roi);
+
+  return (
+    <div
+      className="bracket"
+      style={{
+        position: "relative",
+        border: "1px solid var(--line)",
+        borderTop: `2px solid ${rarity}`,
+        background: "var(--surface-2)",
+        padding: "5px 6px 6px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 5,
+        // ROI-driven highlight: an inset accent bar shaded red→yellow→green.
+        boxShadow: roi == null ? undefined : `inset 4px 0 0 0 ${spectrum}`,
+      }}
+    >
+      {idx === 0 && (
+        <span
+          className="hud hud-ember"
+          style={{ position: "absolute", top: 6, right: 7, fontSize: 7 }}
+        >
+          ★ TOP
+        </span>
+      )}
+
+      {/* item picture, lit by its rarity hue */}
+      <div
+        style={{
+          height: 42,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: `radial-gradient(ellipse at center, ${rarity}22, transparent 70%)`,
+        }}
+      >
+        {o.skin.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={o.skin.image}
+            alt={o.skin.name}
+            style={{ maxWidth: "100%", height: 42, objectFit: "contain" }}
+          />
+        ) : (
+          <span className="hud" style={{ color: "var(--cream-dim)" }}>NO IMG</span>
+        )}
+      </div>
+
+      {/* weapon + name, with a pie-chart glyph in this outcome's donut-slice color */}
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 12 12"
+            style={{ flexShrink: 0, display: "block" }}
+            aria-hidden
+          >
+            <title>this outcome&apos;s pie-chart slice color</title>
+            <circle cx="6" cy="6" r="5.5" fill={color} />
+            <path d="M6 6 L6 0.5 A5.5 5.5 0 0 1 10.8 7.5 Z" fill="rgba(0,0,0,0.5)" />
+          </svg>
+          <span style={{ fontSize: 8, color: "var(--cream-dim)", letterSpacing: "0.04em" }}>
+            {o.skin.weapon.name}
+          </span>
+        </div>
+        <div style={{ fontSize: 10, lineHeight: 1.2, marginTop: 1 }}>{o.skin.name}</div>
+      </div>
+
+      {/* wear / float */}
+      <div className="hud" style={{ display: "flex", justifyContent: "space-between", fontSize: 8 }}>
+        <span>{o.outputWear}</span>
+        <span style={{ color: "var(--amber)" }}>{o.outputFloat.toFixed(4)}</span>
+      </div>
+
+      {/* hit chance (big) + odds */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 15, color: "var(--green)" }}>
+          {(o.probability * 100).toFixed(1)}%
+        </span>
+        <span className="hud" style={{ color: "var(--cream-dim)" }}>{oddsString(o.probability)}</span>
+      </div>
+
+      {/* price / land / roi */}
+      <div
+        style={{
+          borderTop: "1px solid var(--line)",
+          paddingTop: 6,
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+          fontSize: 10,
+        }}
+      >
+        <CardRow label="PRICE" value={usd(o.estimatedPrice)} />
+        <CardRow
+          label="NET"
+          value={land == null ? "—" : signedUsd(land)}
+          color={land == null ? "var(--cream-dim)" : spectrum}
+        />
+        <CardRow
+          label="ROI"
+          value={roi == null ? "—" : `${roi >= 0 ? "+" : ""}${roi.toFixed(0)}%`}
+          color={spectrum}
+        />
+      </div>
+    </div>
+  );
+}
+
+function CardRow({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+      <span className="hud" style={{ color: "var(--cream-dim)" }}>{label}</span>
+      <span style={{ color: color ?? "var(--cream)" }}>{value}</span>
+    </div>
   );
 }
 

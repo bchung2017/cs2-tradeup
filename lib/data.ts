@@ -58,3 +58,26 @@ export function loadPrices(): PriceTable {
   priceCache = JSON.parse(raw) as PriceTable;
   return priceCache;
 }
+
+const WEAR_NAMES = new Set([
+  "Factory New",
+  "Minimal Wear",
+  "Field-Tested",
+  "Well-Worn",
+  "Battle-Scarred",
+]);
+
+// Median market price for a raw inventory market name ("AK-47 | Redline
+// (Field-Tested)", "StatTrak™ …", etc.). Resolves name -> catalog skin, parses
+// the trailing "(Wear)", and reads the price table keyed by `id|wear|tag`.
+// Returns null for anything without a wear/price (cases, stickers, knives — the
+// catalog has no knives — agents, etc.).
+export function priceForMarketName(name: string | null | undefined): number | null {
+  if (!name) return null;
+  const wear = name.match(/\(([^)]+)\)\s*$/)?.[1];
+  if (!wear || !WEAR_NAMES.has(wear)) return null;
+  const skin = loadSkinByName().get(normalizeSkinName(name));
+  if (!skin) return null;
+  const tag = /StatTrak/i.test(name) ? "st" : "norm";
+  return loadPrices()[`${skin.id}|${wear}|${tag}`]?.median ?? null;
+}

@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@csfloat/cs2-inspect-serializer": "^1.1.6",
     "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.10.0",
     "next": "^16.2.6",

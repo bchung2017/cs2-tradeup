@@ -1,5 +1,8 @@
-"use client";
-
+// Server Component: this is just the page's static shell (the two-column
+// layout). The interactive parts are self-contained "use client" islands —
+// TradeupProvider, TradeUpConsole, InventoryPanel — so the shell stays out of
+// the client bundle and off the cold-compile path. Do NOT add "use client"
+// here or hooks to this file; push interactivity into a child island instead.
 import TradeUpConsole from "@/components/TradeUpConsole";
 import InventoryPanel from "@/components/InventoryPanel";
 import { TradeupProvider } from "@/lib/tradeup-context";

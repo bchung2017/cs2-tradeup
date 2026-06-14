@@ -45,6 +45,9 @@ export interface Skin {
   souvenir?: boolean;
   collections: Collection[];
   image?: string;
+  // True for ★-marked inventory knives. Drives the auto ×5 knife contract size
+  // (the catalog carries no knives, so this is only ever set from inventory).
+  isKnife?: boolean;
 }
 
 // Wear tiers and their float ranges (Valve constants).

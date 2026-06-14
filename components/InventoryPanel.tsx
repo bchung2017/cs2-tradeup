@@ -2,14 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTradeup, isStatTrakName } from "@/lib/tradeup-context";
-import { rarityHex } from "@/lib/display";
+import { rarityHex, usd } from "@/lib/display";
 import type { InventoryItem } from "@/lib/steam";
 
 type StatusClass = "ok" | "warn" | "err" | "dim";
-
-type DeepToast =
-  | { kind: "confirm" }
-  | { kind: "progress"; done: number; total: number; status: string };
 
 interface SnapshotMeta {
   steamid: string;
@@ -53,6 +49,20 @@ async function api<T = any>(path: string, opts?: RequestInit): Promise<ApiResult
   return { ok: r.ok, status: r.status, body };
 }
 
+// Compact relative age: "12s ago" / "5m ago" / "3h ago" / "2d ago".
+function relativeAge(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+// A snapshot older than the 60s sync floor is considered stale.
+const STALE_MS = 60_000;
+
 export default function InventoryPanel() {
   const [input, setInput] = useState("https://steamcommunity.com/profiles/76561198059693930");
   const [steamid, setSteamid] = useState<string | null>(null);
@@ -61,15 +71,17 @@ export default function InventoryPanel() {
   const [items, setItems] = useState<InventoryItem[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  // Epoch ms of the snapshot currently shown, + a ticking clock so the
+  // "last synced …" label and its stale styling update on their own.
+  const [syncedAt, setSyncedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   // The input string of the currently loaded profile. The action button shows
   // SYNC while `input` matches this, and reverts to LOAD once the text is edited.
   const [loadedInput, setLoadedInput] = useState<string | null>(null);
   const [rarityFilter, setRarityFilter] = useState<string>("ALL");
-  const [toast, setToast] = useState<DeepToast | null>(null);
 
   const steamidRef = useRef<string | null>(null);
   steamidRef.current = steamid;
-  const deepAbort = useRef<AbortController | null>(null);
 
   const { slots, addFromInventory, setSteamid: setSharedSteamid } = useTradeup();
   const setMsg = useCallback((msg: string, cls: StatusClass = "dim") => setStatus({ msg, cls }), []);
@@ -79,6 +91,13 @@ export default function InventoryPanel() {
   useEffect(() => {
     setSharedSteamid(steamid);
   }, [steamid, setSharedSteamid]);
+
+  // Tick every 10s so the relative "synced …" label stays current and flips to
+  // stale on its own without needing another render to be triggered.
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10_000);
+    return () => clearInterval(t);
+  }, []);
 
   // Asset IDs currently staged on the trade side. An item lives in exactly one
   // place: moving it to a slot hides it here; clearing the slot brings it back.
@@ -96,8 +115,7 @@ export default function InventoryPanel() {
   const onItemClick = useCallback(
     (it: InventoryItem) => {
       const r = addFromInventory(it);
-      if (r.ok) setMsg(`added // ${it.name ?? "item"}`, "ok");
-      else setMsg(r.reason ?? "could not add", "warn");
+      if (!r.ok) setMsg(r.reason ?? "could not add", "warn");
     },
     [addFromInventory, setMsg],
   );
@@ -109,87 +127,14 @@ export default function InventoryPanel() {
     if (!r.ok) {
       setItems([]);
       setMeta(null);
+      setSyncedAt(null);
       return;
     }
-    const s = r.body as { steamid: string; count: number; items: InventoryItem[] };
+    const s = r.body as { steamid: string; count: number; items: InventoryItem[]; age_ms?: number };
     setMeta({ steamid: s.steamid, count: s.count });
     setItems(s.items);
+    setSyncedAt(Date.now() - (s.age_ms ?? 0));
   }, []);
-
-  // Open the SSE deep-sync stream and drive the progress toast off its events.
-  // Used for both a fresh start and resume (the engine skips already-cached floats).
-  const runDeepSync = useCallback(async () => {
-    const id = steamidRef.current;
-    if (!id) return;
-    setToast({ kind: "progress", done: 0, total: 0, status: "running" });
-    const ac = new AbortController();
-    deepAbort.current = ac;
-    let last = { done: 0, total: 0 };
-    try {
-      const res = await fetch(`/api/deep-sync/${id}/run`, { method: "POST", signal: ac.signal });
-      if (!res.ok || !res.body) {
-        setMsg(`deep sync failed // ${res.status}`, "err");
-        setToast(null);
-        return;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith("data:")) continue;
-          const ev = JSON.parse(line.slice(5).trim());
-          if (ev.type === "start") {
-            last = { done: 0, total: ev.total };
-            setToast({ kind: "progress", done: 0, total: ev.total, status: "running" });
-          } else if (ev.type === "item") {
-            last = { done: ev.done, total: ev.total };
-            setToast({ kind: "progress", done: ev.done, total: ev.total, status: "running" });
-          } else if (ev.type === "halted") {
-            setToast({ kind: "progress", done: last.done, total: last.total, status: ev.status });
-            setMsg(`deep sync ${ev.status} // ${last.done}/${last.total}`, "warn");
-          } else if (ev.type === "error") {
-            setMsg(`deep sync error // ${ev.error}`, "err");
-            setToast(null);
-          } else if (ev.type === "done") {
-            setMsg(`deep sync complete // ${ev.done}/${ev.total} floats`, "ok");
-            setToast(null);
-            await loadAndRender();
-          }
-        }
-      }
-    } catch (e) {
-      if ((e as Error).name !== "AbortError") setMsg(`deep sync error // ${(e as Error).message}`, "err");
-    } finally {
-      deepAbort.current = null;
-    }
-  }, [loadAndRender, setMsg]);
-
-  // Control: pause/stop write the job status (engine halts next iteration);
-  // stop also aborts the local stream and clears the toast.
-  const controlDeep = useCallback(
-    async (action: "pause" | "stop") => {
-      const id = steamidRef.current;
-      if (!id) return;
-      await fetch(`/api/deep-sync/${id}/control`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action }),
-      }).catch(() => {});
-      if (action === "stop") {
-        deepAbort.current?.abort();
-        setToast(null);
-        setMsg("deep sync stopped", "warn");
-      }
-    },
-    [setMsg],
-  );
 
   // On mount: resolve the default profile -> steamid, then render the last
   // persisted snapshot from SQLite (no Steam sync). Items appear automatically.
@@ -210,8 +155,6 @@ export default function InventoryPanel() {
         steamidRef.current = r.body.steamid;
         setLoadedInput(raw);
         await loadAndRender();
-        // No auto-toast on mount: the deep-sync toast only appears when the
-        // user starts it (or while a run they started is active).
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -365,6 +308,45 @@ export default function InventoryPanel() {
             </h1>
           </header>
 
+          {/* last-synced freshness — green when within the 60s floor, an obvious
+              red "STALE" banner once the snapshot ages past it. */}
+          {syncedAt != null &&
+            (() => {
+              const stale = now - syncedAt >= STALE_MS;
+              return (
+                <div
+                  className="hud"
+                  style={{
+                    marginTop: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "6px 10px",
+                    border: `1px solid ${stale ? "var(--loss)" : "var(--green-dim)"}`,
+                    background: stale ? "rgba(255,90,90,0.10)" : "transparent",
+                    color: stale ? "var(--loss)" : "var(--green)",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      background: stale ? "var(--loss)" : "var(--green)",
+                      boxShadow: `0 0 6px ${stale ? "var(--loss)" : "var(--green)"}`,
+                      flexShrink: 0,
+                    }}
+                  />
+                  {stale ? "STALE" : "FRESH"} · last synced {relativeAge(now - syncedAt)}
+                  {stale && (
+                    <span style={{ marginLeft: "auto", color: "var(--cream-dim)" }}>
+                      hit SYNC to refresh
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
+
           {/* resolve + sync bar */}
           <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
             <input
@@ -399,23 +381,6 @@ export default function InventoryPanel() {
               }}
             >
               {actionLabel}
-            </button>
-            <button
-              onClick={() => setToast({ kind: "confirm" })}
-              disabled={!steamid || toast !== null}
-              title="Resolve per-item float / paint via inspect links (slow, rate-limited)"
-              className="hud"
-              style={{
-                background: "transparent",
-                border: "1px solid var(--green-faint)",
-                color: !steamid || toast !== null ? "var(--cream-dim)" : "var(--green-dim)",
-                padding: "10px 14px",
-                opacity: !steamid || toast !== null ? 0.5 : 1,
-                cursor: !steamid || toast !== null ? "not-allowed" : "pointer",
-                pointerEvents: !steamid || toast !== null ? "none" : "auto",
-              }}
-            >
-              GET FLOATS
             </button>
           </div>
 
@@ -537,12 +502,24 @@ export default function InventoryPanel() {
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
                   <span className="hud hud-amber">{it.rarity ?? "—"}</span>
-                  {/* Float is only known once a deep sync has resolved it. */}
+                  {/* Float comes from the inventory feed's asset_properties. */}
                   {it.float != null && (
                     <span className="hud" style={{ color: "var(--amber)" }} title="Float (wear value)">
                       {it.float.toFixed(4)}
                     </span>
                   )}
+                </div>
+                {/* Median market price, resolved from the price table by name + wear. */}
+                <div
+                  className="hud"
+                  style={{
+                    marginTop: 4,
+                    textAlign: "right",
+                    color: it.price != null ? "var(--green)" : "var(--cream-dim)",
+                  }}
+                  title="Median market price"
+                >
+                  {it.price != null ? usd(it.price) : "no price"}
                 </div>
               </div>
             ))}
@@ -555,106 +532,7 @@ export default function InventoryPanel() {
           </div>
         )}
       </main>
-
-      <DeepSyncToast
-        toast={toast}
-        onConfirm={() => runDeepSync()}
-        onCancel={() => setToast(null)}
-        onPause={() => controlDeep("pause")}
-        onStop={() => controlDeep("stop")}
-        onResume={() => runDeepSync()}
-      />
     </>
-  );
-}
-
-// Fixed-position deep-sync toast: a ⚠ confirm gate, then a live progress card
-// with pause/stop while running and resume/stop once paused or interrupted.
-function DeepSyncToast({
-  toast,
-  onConfirm,
-  onCancel,
-  onPause,
-  onStop,
-  onResume,
-}: {
-  toast: DeepToast | null;
-  onConfirm: () => void;
-  onCancel: () => void;
-  onPause: () => void;
-  onStop: () => void;
-  onResume: () => void;
-}) {
-  if (!toast) return null;
-  const running = toast.kind === "progress" && toast.status === "running";
-  const pct = toast.kind === "progress" && toast.total > 0 ? (toast.done / toast.total) * 100 : 0;
-
-  const btn = (label: string, onClick: () => void, accent: string): React.ReactNode => (
-    <button
-      onClick={onClick}
-      className="hud"
-      style={{
-        background: "transparent",
-        border: `1px solid ${accent}`,
-        color: accent,
-        padding: "7px 14px",
-      }}
-    >
-      {label}
-    </button>
-  );
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        right: 24,
-        bottom: 24,
-        zIndex: 50,
-        width: 320,
-        background: "var(--surface)",
-        border: "1px solid var(--surface-line)",
-        boxShadow: "0 0 0 1px rgba(0,0,0,0.6), 0 10px 40px rgba(0,0,0,0.8)",
-        padding: 16,
-      }}
-    >
-      {toast.kind === "confirm" ? (
-        <>
-          <div className="hud hud-amber">⚠ DEEP SYNC</div>
-          <div style={{ fontSize: 12, color: "var(--cream-dim)", margin: "8px 0 14px", lineHeight: 1.5 }}>
-            Resolves every item&apos;s float &amp; paint via inspect links. This is slow and rate-limited —
-            it runs in the background and you can pause or stop anytime.
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {btn("START", onConfirm, "var(--green)")}
-            {btn("CANCEL", onCancel, "var(--surface-line)")}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="hud hud-ember">DEEP SYNC // {toast.status.toUpperCase()}</div>
-          <div style={{ fontSize: 20, margin: "6px 0 10px", color: "var(--green)" }}>
-            {toast.done}
-            <span style={{ color: "var(--cream-dim)", fontSize: 14 }}> / {toast.total}</span>
-          </div>
-          <div style={{ height: 4, background: "var(--void)", border: "1px solid var(--surface-line)" }}>
-            <div
-              style={{
-                height: "100%",
-                width: `${pct}%`,
-                background: "var(--green)",
-                boxShadow: "0 0 6px var(--green)",
-                transition: "width 0.2s ease",
-              }}
-            />
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            {running ? btn("PAUSE", onPause, "var(--amber)") : btn("RESUME", onResume, "var(--green)")}
-            {btn("STOP", onStop, "var(--loss)")}
-          </div>
-        </>
-      )}
-    </div>
   );
 }
 

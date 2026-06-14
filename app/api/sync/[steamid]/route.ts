@@ -18,11 +18,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ steamid: strin
     return NextResponse.json({ code: "RESOLVE", error: "bad steamid" }, { status: 400 });
   }
   const force = new URL(req.url).searchParams.get("force") === "1";
+  console.log(`[sync] steamid=${steamid} force=${force} — fetching from Steam…`);
   try {
     const { count, changed } = await syncInventory(steamid, { force });
+    console.log(`[sync] steamid=${steamid} -> ${count} items (${changed ? "updated" : "unchanged"})`);
     return NextResponse.json({ count, changed });
   } catch (e) {
     const err = e as SteamError;
+    console.warn(`[sync] steamid=${steamid} FAILED code=${err.code} msg=${err.message}`);
     if (err.code === "FLOOR") {
       return NextResponse.json({ code: "FLOOR", retry_ms: err.retryMs ?? 0 }, { status: 429 });
     }

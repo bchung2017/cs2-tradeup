@@ -141,7 +141,7 @@ export default function CacheInspector() {
             onClick={() => (confirmAll ? clear() : setConfirmAll(true))}
             disabled={clearing !== null}
             className="hud"
-            title="Delete all snapshots, item floats, and deep-sync jobs from loader.db"
+            title="Delete all snapshots and item floats from loader.db"
             style={{
               background: confirmAll ? "var(--loss)" : "transparent",
               border: "1px solid var(--loss)",
