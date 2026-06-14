@@ -46,6 +46,10 @@ export default function CacheInspector() {
   const [report, setReport] = useState<CacheReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // `clearing` holds the scope mid-request ("all" or a steamid); `confirmAll`
+  // gates the wipe behind a second click so it can't fire by accident.
+  const [clearing, setClearing] = useState<string | null>(null);
+  const [confirmAll, setConfirmAll] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,6 +64,26 @@ export default function CacheInspector() {
       setLoading(false);
     }
   }, []);
+
+  // Force-clear: no steamid wipes everything, otherwise just that snapshot.
+  const clear = useCallback(
+    async (steamid?: string) => {
+      setClearing(steamid ?? "all");
+      setError(null);
+      try {
+        const qs = steamid ? `?steamid=${encodeURIComponent(steamid)}` : "";
+        const r = await fetch(`/api/cache${qs}`, { method: "DELETE" });
+        if (!r.ok) throw new Error(`http ${r.status}`);
+        setConfirmAll(false);
+        await load();
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setClearing(null);
+      }
+    },
+    [load],
+  );
 
   useEffect(() => {
     load();
@@ -85,19 +109,49 @@ export default function CacheInspector() {
             <span style={{ color: "var(--green-faint)", fontWeight: 400 }}> --inspect</span>
           </h1>
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="hud"
-          style={{
-            background: "transparent",
-            border: "1px solid var(--surface-line)",
-            color: loading ? "var(--cream-dim)" : "var(--green)",
-            padding: "8px 16px",
-          }}
-        >
-          {loading ? "READING…" : "REFRESH"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="hud"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--surface-line)",
+              color: loading ? "var(--cream-dim)" : "var(--green)",
+              padding: "8px 16px",
+            }}
+          >
+            {loading ? "READING…" : "REFRESH"}
+          </button>
+          {confirmAll && (
+            <button
+              onClick={() => setConfirmAll(false)}
+              className="hud"
+              style={{
+                background: "transparent",
+                border: "1px solid var(--surface-line)",
+                color: "var(--cream-dim)",
+                padding: "8px 16px",
+              }}
+            >
+              CANCEL
+            </button>
+          )}
+          <button
+            onClick={() => (confirmAll ? clear() : setConfirmAll(true))}
+            disabled={clearing !== null}
+            className="hud"
+            title="Delete all snapshots, item floats, and deep-sync jobs from loader.db"
+            style={{
+              background: confirmAll ? "var(--loss)" : "transparent",
+              border: "1px solid var(--loss)",
+              color: confirmAll ? "var(--void)" : "var(--loss)",
+              padding: "8px 16px",
+            }}
+          >
+            {clearing === "all" ? "CLEARING…" : confirmAll ? "CONFIRM WIPE" : "CLEAR ALL"}
+          </button>
+        </div>
       </header>
 
       {report && (
@@ -128,6 +182,7 @@ export default function CacheInspector() {
                     <th style={th}>SIZE</th>
                     <th style={th}>COUNT</th>
                     <th style={th}>FLOAT COVERAGE</th>
+                    <th style={th}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -144,6 +199,22 @@ export default function CacheInspector() {
                       </td>
                       <td style={td}>
                         {s.parseOk ? `${s.covered} / ${s.inspectable} inspectable` : <span style={{ color: "var(--loss)" }}>CORRUPT — won&apos;t parse</span>}
+                      </td>
+                      <td style={{ ...td, textAlign: "right" }}>
+                        <button
+                          onClick={() => clear(s.steamid)}
+                          disabled={clearing !== null}
+                          title="Clear this profile's snapshot, floats, and job"
+                          className="hud"
+                          style={{
+                            background: "transparent",
+                            border: "1px solid var(--loss)",
+                            color: "var(--loss)",
+                            padding: "4px 10px",
+                          }}
+                        >
+                          {clearing === s.steamid ? "…" : "CLEAR"}
+                        </button>
                       </td>
                     </tr>
                   ))}

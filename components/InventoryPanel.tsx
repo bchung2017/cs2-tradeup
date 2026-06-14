@@ -71,8 +71,14 @@ export default function InventoryPanel() {
   steamidRef.current = steamid;
   const deepAbort = useRef<AbortController | null>(null);
 
-  const { slots, addFromInventory } = useTradeup();
+  const { slots, addFromInventory, setSteamid: setSharedSteamid } = useTradeup();
   const setMsg = useCallback((msg: string, cls: StatusClass = "dim") => setStatus({ msg, cls }), []);
+
+  // Mirror the resolved profile to shared context so the trade-up header (left
+  // side) can load this profile's avatar.
+  useEffect(() => {
+    setSharedSteamid(steamid);
+  }, [steamid, setSharedSteamid]);
 
   // Asset IDs currently staged on the trade side. An item lives in exactly one
   // place: moving it to a slot hides it here; clearing the slot brings it back.
@@ -432,37 +438,61 @@ export default function InventoryPanel() {
             </div>
           )}
 
-          {/* rarity filter — selecting a grade narrows the grid to that rarity */}
+          {/* rarity filter — color-coded chips; clicking a grade narrows the grid
+              to that rarity. Overridden (and disabled) while a contract locks the
+              rarity. */}
           {items && items.length > 0 && (
-            <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
-              <span className="hud">RARITY</span>
-              <select
-                value={effectiveRarity}
-                disabled={!!lockedRarity}
-                onChange={(e) => setRarityFilter(e.target.value)}
-                style={{
-                  background: "var(--void)",
-                  border: "1px solid var(--surface-line)",
-                  color: "var(--green)",
-                  fontFamily: "var(--mono)",
-                  fontSize: 12,
-                  padding: "6px 10px",
-                  outline: "none",
-                  opacity: lockedRarity ? 0.7 : 1,
-                  cursor: lockedRarity ? "not-allowed" : "pointer",
-                }}
-              >
-                <option value="ALL">ALL ({available.length})</option>
-                {rarities.map((r) => (
-                  <option key={r} value={r}>
-                    {r} ({available.filter((it) => it.rarity === r).length})
-                  </option>
-                ))}
-              </select>
-              <span className="hud">
-                {lockedRarity ? "LOCKED // " : ""}
-                {filtered.length} SHOWN
-              </span>
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                <span className="hud">RARITY</span>
+                <span className="hud">
+                  {lockedRarity ? "LOCKED // " : ""}
+                  {filtered.length} SHOWN
+                </span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {[
+                  { key: "ALL", label: "ALL", count: available.length, color: "var(--green)" },
+                  ...rarities.map((r) => ({
+                    key: r,
+                    label: r,
+                    count: available.filter((it) => it.rarity === r).length,
+                    color: rarityHex(r),
+                  })),
+                ].map((chip) => {
+                  const active = effectiveRarity === chip.key;
+                  return (
+                    <button
+                      key={chip.key}
+                      onClick={() => setRarityFilter(chip.key)}
+                      disabled={!!lockedRarity}
+                      title={lockedRarity ? "Rarity locked by the staged contract" : `Show ${chip.label}`}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        background: active ? chip.color : "transparent",
+                        color: active ? "var(--void)" : "var(--cream-dim)",
+                        // Longhand (not the `border` shorthand) so it doesn't
+                        // conflict with the accent borderLeft on re-render.
+                        borderTop: `1px solid ${active ? chip.color : "var(--surface-line)"}`,
+                        borderRight: `1px solid ${active ? chip.color : "var(--surface-line)"}`,
+                        borderBottom: `1px solid ${active ? chip.color : "var(--surface-line)"}`,
+                        borderLeft: `3px solid ${chip.color}`,
+                        padding: "5px 10px",
+                        fontFamily: "var(--mono)",
+                        fontSize: 11,
+                        letterSpacing: "0.08em",
+                        cursor: lockedRarity ? "not-allowed" : "pointer",
+                        opacity: lockedRarity && !active ? 0.4 : 1,
+                      }}
+                    >
+                      <span>{chip.label}</span>
+                      <span style={{ opacity: active ? 0.8 : 0.6 }}>{chip.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -505,7 +535,15 @@ export default function InventoryPanel() {
                 <div style={{ fontSize: 12, lineHeight: 1.3, margin: "8px 0 4px" }}>
                   {it.name ?? "(unnamed)"}
                 </div>
-                <div className="hud hud-amber">{it.rarity ?? "—"}</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                  <span className="hud hud-amber">{it.rarity ?? "—"}</span>
+                  {/* Float is only known once a deep sync has resolved it. */}
+                  {it.float != null && (
+                    <span className="hud" style={{ color: "var(--amber)" }} title="Float (wear value)">
+                      {it.float.toFixed(4)}
+                    </span>
+                  )}
+                </div>
               </div>
             ))}
           </div>

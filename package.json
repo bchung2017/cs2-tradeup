@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "fetch-data": "tsx scripts/fetch-data.ts",
+    "admin": "tsx scripts/admin-server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

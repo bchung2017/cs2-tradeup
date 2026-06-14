@@ -40,7 +40,11 @@ async function main() {
 
   const skins: Skin[] = raw
     .filter((s) => s.weapon && s.rarity && s.min_float != null && s.max_float != null)
-    .filter((s) => !s.souvenir)
+    // ByMykel's `souvenir`/`stattrak` flags now mean "a souvenir/stattrak variant
+    // exists", not "this entry IS one" — every collection skin (incl. AK-47 |
+    // Redline) has souvenir:true, so filtering on it drops the whole catalog.
+    // Knives/gloves carry no collection, so the collections filter alone excludes
+    // them; we keep one base finish per skin and mark it non-souvenir below.
     .filter((s) => (s.collections?.length ?? 0) > 0)
     .map((s) => ({
       id: s.id,

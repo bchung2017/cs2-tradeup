@@ -64,7 +64,14 @@ export default function TradeUpConsole() {
     setRunning(true);
     setResult(null);
     try {
-      const inputs = slots.map((s) => ({ skinId: s.skin!.id, float: s.float }));
+      const inputs = slots.map((s) => {
+        const skin = s.skin!;
+        // For inventory items (synthetic `inv-` id) send the reconstructed
+        // "Weapon | Paint" market name so the server can match a catalog skin.
+        // Catalog picks already resolve by id, so they need no name.
+        const marketName = skin.id.startsWith("inv-") ? `${skin.weapon.name} | ${skin.name}` : undefined;
+        return { skinId: skin.id, float: s.float, marketName };
+      });
       const res = await fetch("/api/tradeup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -104,7 +111,9 @@ export default function TradeUpConsole() {
         }}
       >
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-        <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <ProfilePic />
+          <div>
           <span className="hud hud-ember">TRADE-UP CONSOLE</span>
           <h1
             className="glow"
@@ -120,6 +129,7 @@ export default function TradeUpConsole() {
             <span style={{ color: "var(--green-dim)" }}>$ </span>
             tradeup
           </h1>
+          </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
           {/* contract size — standard (10) or knife (5). Locked once staging starts. */}
@@ -214,22 +224,31 @@ export default function TradeUpConsole() {
 
             {slot.skin ? (
               <>
-                {slot.skin.image ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={slot.skin.image}
-                    alt={slot.skin.name}
-                    style={{ width: "100%", height: 56, objectFit: "contain" }}
-                  />
-                ) : (
-                  <div style={{ height: 56 }} />
-                )}
-                <div>
-                  <div style={{ fontSize: 10, color: "var(--cream-dim)" }}>
-                    {slot.stattrak && <span style={{ color: "var(--ember)" }}>ST </span>}
-                    {slot.skin.weapon.name}
+                {/* Click the staged item to clear the slot — inventory items
+                    return to the right-side grid (the × button does the same). */}
+                <div
+                  onClick={() => clearSlot(i)}
+                  role="button"
+                  title="Click to return to inventory"
+                  style={{ cursor: "pointer" }}
+                >
+                  {slot.skin.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={slot.skin.image}
+                      alt={slot.skin.name}
+                      style={{ width: "100%", height: 56, objectFit: "contain" }}
+                    />
+                  ) : (
+                    <div style={{ height: 56 }} />
+                  )}
+                  <div>
+                    <div style={{ fontSize: 10, color: "var(--cream-dim)" }}>
+                      {slot.stattrak && <span style={{ color: "var(--ember)" }}>ST </span>}
+                      {slot.skin.weapon.name}
+                    </div>
+                    <div style={{ fontSize: 11, lineHeight: 1.2 }}>{slot.skin.name}</div>
                   </div>
-                  <div style={{ fontSize: 11, lineHeight: 1.2 }}>{slot.skin.name}</div>
                 </div>
                 <input
                   type="number"
@@ -327,6 +346,98 @@ export default function TradeUpConsole() {
       />
     </main>
     </>
+  );
+}
+
+// Profile-picture loader pinned to the top-left header: pulls the loaded
+// profile's Steam avatar (mirrored into shared context from the inventory side)
+// and shows a phosphor pulse while it resolves, the avatar once loaded, and a
+// dim placeholder when there's no profile or the lookup fails.
+function ProfilePic() {
+  const { steamid } = useTradeup();
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+
+  useEffect(() => {
+    if (!steamid) {
+      setAvatar(null);
+      setState("idle");
+      return;
+    }
+    let cancelled = false;
+    setState("loading");
+    setAvatar(null);
+    fetch(`/api/avatar/${steamid}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { avatar?: string }) => {
+        if (cancelled) return;
+        if (d.avatar) {
+          setAvatar(d.avatar);
+          setState("idle");
+        } else {
+          setState("error");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [steamid]);
+
+  const SIZE = 54;
+  return (
+    <div
+      title={steamid ? `steam profile ${steamid}` : "no profile loaded"}
+      style={{
+        width: SIZE,
+        height: SIZE,
+        flexShrink: 0,
+        position: "relative",
+        overflow: "hidden",
+        border: `1px solid ${avatar ? "var(--green)" : "var(--green-faint)"}`,
+        background: "var(--void)",
+        boxShadow: avatar ? "0 0 8px rgba(51,255,51,0.35)" : "none",
+      }}
+    >
+      <style>{`@keyframes pp-pulse{0%,100%{opacity:.25}50%{opacity:.7}}`}</style>
+      {avatar ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={avatar}
+          alt="profile"
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+      ) : state === "loading" ? (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            background:
+              "linear-gradient(135deg, rgba(51,255,51,0.05), rgba(51,255,51,0.28), rgba(51,255,51,0.05))",
+            animation: "pp-pulse 1.1s ease-in-out infinite",
+          }}
+        />
+      ) : (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: state === "error" ? "var(--loss)" : "var(--green-faint)",
+            fontFamily: "var(--mono)",
+            fontSize: 18,
+          }}
+        >
+          {state === "error" ? "✕" : "☻"}
+        </div>
+      )}
+    </div>
   );
 }
 

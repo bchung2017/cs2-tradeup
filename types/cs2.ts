@@ -67,6 +67,10 @@ export const WEAR_RANGES: { wear: Wear; min: number; max: number }[] = [
 export interface TradeupInput {
   skinId: string;
   float: number;
+  // Market name of the staged item ("Weapon | Paint"), sent for inventory items
+  // whose synthetic `inv-<assetid>` id isn't in the catalog. The server resolves
+  // it to a real catalog skin by normalized name. Absent for catalog picks.
+  marketName?: string;
 }
 
 // One possible output skin + its computed float + probability.
@@ -89,10 +93,19 @@ export interface TradeupResult {
   warnings: string[]; // e.g. mixed collections, mixed stattrak
 }
 
-// Mock price entry. Keyed by `${skinId}|${wear}|${stattrak ? "st" : "norm"}`.
+// Price entry. Keyed by `${skinId}|${wear}|${stattrak ? "st" : "norm"}`.
+// `source`/`sources`/`updatedAt` are present on real entries pulled by the
+// admin price sync; absent on placeholder entries seeded by `npm run fetch-data`.
 export interface PriceEntry {
+  // The headline value used by trade-up EV math. For a market-average sync this
+  // is the mean of the available per-source prices (see `sources`).
   median: number;
-  lowest: number;
+  lowest: number; // min across the contributing sources
   volume: number;
+  source?: string; // "market-avg" | "steam-direct" | a single provider; undefined = mock
+  // Per-source prices that fed the average, e.g. { steam: 43.36, skinport: 30.72,
+  // buff163: 29.58 }. Present on market-average entries; lets the UI show the spread.
+  sources?: Record<string, number>;
+  updatedAt?: number; // epoch ms of the sync that wrote this entry
 }
 export type PriceTable = Record<string, PriceEntry>;

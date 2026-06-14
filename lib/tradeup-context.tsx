@@ -28,6 +28,10 @@ interface TradeupCtx {
   setCount: (n: number) => void;
   // Drops an inventory item into the next empty slot. Respects the rarity + StatTrak lock.
   addFromInventory: (item: InventoryItem) => { ok: boolean; reason?: string };
+  // The currently loaded profile's steamid64, mirrored from the inventory side so
+  // the trade-up header can show that profile's avatar. Null until one resolves.
+  steamid: string | null;
+  setSteamid: (id: string | null) => void;
 }
 
 const Ctx = createContext<TradeupCtx | null>(null);
@@ -67,6 +71,7 @@ function skinFromInventory(item: InventoryItem): Skin {
 export function TradeupProvider({ children }: { children: React.ReactNode }) {
   const [count, setCountState] = useState(10);
   const [slots, setSlots] = useState<Slot[]>(() => makeSlots(10));
+  const [steamid, setSteamid] = useState<string | null>(null);
   const slotsRef = useRef(slots);
   slotsRef.current = slots;
 
@@ -100,8 +105,8 @@ export function TradeupProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ slots, setSlots, count, setCount, addFromInventory }),
-    [slots, count, setCount, addFromInventory],
+    () => ({ slots, setSlots, count, setCount, addFromInventory, steamid, setSteamid }),
+    [slots, count, setCount, addFromInventory, steamid],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -542,3 +542,57 @@ export function getCacheReport(): CacheReport {
 
   return { db: { bytes, files }, snapshots, meta: { total: metaTotal, orphans, outOfRange }, jobs };
 }
+
+export interface ClearResult {
+  snapshots: number;
+  meta: number;
+  jobs: number;
+}
+
+/**
+ * Force-clears the persistent cache. With a `steamid`, clears only that
+ * profile's snapshot, its per-item float/paint meta, and its deep-sync job;
+ * with no argument, wipes everything. Also resets the in-memory sync guards so
+ * a fresh sync right after a clear isn't blocked by the 60s floor or a stale
+ * inflight flag. The loader.db file itself is kept (rows are deleted, not the DB).
+ */
+export function clearCache(steamid?: string): ClearResult {
+  const store = getStore();
+  const db = store.db;
+  const hasJobs = !!db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='deep_sync_jobs'")
+    .get();
+
+  if (steamid) {
+    // item_meta is keyed by assetid, so scope its delete to this snapshot's assets.
+    let meta = 0;
+    const row = store.getSnap.get(steamid) as { payload: string } | undefined;
+    if (row) {
+      try {
+        const ids = (JSON.parse(row.payload) as SnapshotPayload).items.map((i) => i.assetid);
+        for (let i = 0; i < ids.length; i += 500) {
+          const chunk = ids.slice(i, i + 500);
+          meta += db
+            .prepare(`DELETE FROM item_meta WHERE assetid IN (${chunk.map(() => "?").join(",")})`)
+            .run(...chunk).changes;
+        }
+      } catch {
+        // corrupt payload — drop the snapshot row anyway, leave meta untouched
+      }
+    }
+    const snapshots = db.prepare("DELETE FROM snapshots WHERE steamid=?").run(steamid).changes;
+    const jobs = hasJobs ? db.prepare("DELETE FROM deep_sync_jobs WHERE steamid=?").run(steamid).changes : 0;
+    store.lastSync.delete(steamid);
+    store.inflight.delete(steamid);
+    store.deepInflight.delete(steamid);
+    return { snapshots, meta, jobs };
+  }
+
+  const snapshots = db.prepare("DELETE FROM snapshots").run().changes;
+  const meta = db.prepare("DELETE FROM item_meta").run().changes;
+  const jobs = hasJobs ? db.prepare("DELETE FROM deep_sync_jobs").run().changes : 0;
+  store.lastSync.clear();
+  store.inflight.clear();
+  store.deepInflight.clear();
+  return { snapshots, meta, jobs };
+}
