@@ -8,12 +8,16 @@ export interface Slot {
   skin: Skin | null;
   float: number;
   stattrak: boolean;
+  // Median market price of the staged item, carried from the inventory feed so
+  // the trade-up side can show per-input price. Null/undefined when unknown
+  // (e.g. catalog picks, or items with no priced wear).
+  price?: number | null;
 }
 
 export const makeSlots = (n: number): Slot[] =>
   Array.from({ length: n }, () => ({ skin: null, float: 0, stattrak: false }));
 
-// Standard contract = 10 inputs; knife contract = 5.
+// Standard contract = 10 inputs; the special Covert→knife contract = 5.
 const STANDARD_COUNT = 10;
 const KNIFE_COUNT = 5;
 export const EMPTY_SLOTS: Slot[] = makeSlots(STANDARD_COUNT);
@@ -23,35 +27,67 @@ export function isStatTrakName(name: string | null | undefined): boolean {
   return /StatTrak/i.test(name ?? "");
 }
 
-// CS2 knife base names. Inventory knives are ★-marked and their weapon segment
-// is one of these; gloves are also ★-marked but won't match, so they stay ×10.
-const KNIFE_BASE_NAMES = new Set([
-  "Bayonet", "Bowie Knife", "Butterfly Knife", "Classic Knife", "Falchion Knife",
-  "Flip Knife", "Gut Knife", "Huntsman Knife", "Karambit", "Kukri Knife",
-  "M9 Bayonet", "Navaja Knife", "Nomad Knife", "Paracord Knife", "Shadow Daggers",
-  "Skeleton Knife", "Stiletto Knife", "Survival Knife", "Talon Knife", "Ursus Knife",
+// ★-marked items are the rare-special "Gold" tier — knives and gloves. In CS2
+// these are trade-up OUTPUTS, never inputs: a 5× Covert contract *produces* one.
+// Knives even carry a Covert rarity tag that would otherwise pass the tier gate,
+// so eligibility rejects anything ★-marked up front.
+function isStarItem(name: string | null | undefined): boolean {
+  return !!name && name.includes("★");
+}
+
+// The ×5 "knife" contract is the special Covert→Gold trade-up: five Covert (red)
+// weapon skins roll one knife/glove. It's the only contract that isn't ×10, and
+// Covert is the only rarity that leads it.
+export function isKnifeContract(skin: Skin | null | undefined): boolean {
+  return skin?.rarity.name === "Covert";
+}
+
+// Weapon grades usable as trade-up inputs. Consumer→Classified lead the standard
+// ×10 contract; Covert (red) weapon skins lead the special ×5 knife contract
+// (Covert → Gold). Contraband sits above the range, and non-weapon items — medals,
+// coins, agents, cases, stickers, graffiti, music kits, pins, gloves, and ★ knives
+// — are either outside this set or ★-marked and caught before the tier check.
+const TRADEABLE_INPUT_TIERS = new Set<string>([
+  "Consumer Grade",
+  "Industrial Grade",
+  "Mil-Spec Grade",
+  "Restricted",
+  "Classified",
+  "Covert",
 ]);
 
-// Detect a knife from the raw inventory market name (e.g. "★ Karambit | Doppler").
-function isKnifeMarketName(name: string | null | undefined): boolean {
-  if (!name || !name.includes("★")) return false;
-  const weapon = name
-    .replace(/^★\s*/, "")
-    .replace(/^StatTrak™?\s*/i, "")
-    .split(" | ")[0]
-    .trim();
-  return KNIFE_BASE_NAMES.has(weapon);
+function isSouvenirName(name: string | null | undefined): boolean {
+  return /^Souvenir\s/i.test(name ?? "");
 }
 
-export function isKnifeSkin(skin: Skin | null | undefined): boolean {
-  return !!skin?.isKnife;
+// Float-independent gate: can this inventory item EVER be a trade-up input? This
+// is distinct from the per-contract rarity/StatTrak lock (which only blocks an
+// otherwise-eligible item from joining the contract currently staged). Used by
+// both the grid (to disable a tile) and addFromInventory (to reject the add),
+// so the UI never shows an item as usable that the handler then refuses.
+export function inventoryInputEligibility(
+  item: InventoryItem,
+): { eligible: boolean; reason?: string } {
+  // ★ knives & gloves are the Gold output tier, never inputs — reject them first,
+  // before the tier gate, since knives carry a Covert rarity that would pass it.
+  if (isStarItem(item.name)) {
+    return { eligible: false, reason: "★ knives & gloves can't be trade-up inputs" };
+  }
+  if (isSouvenirName(item.name)) {
+    return { eligible: false, reason: "Souvenir — not a trade-up input" };
+  }
+  if (!item.rarity || !TRADEABLE_INPUT_TIERS.has(item.rarity)) {
+    return { eligible: false, reason: `${item.rarity ?? "This item"} — not a trade-up input` };
+  }
+  return { eligible: true };
 }
 
-// Contract size derives from the first staged item: a knife forces ×5, anything
-// else (or an empty grid) stays ×10. Resizing preserves staged items in order.
+// Contract size derives from the first staged item: a Covert (red) lead forces
+// the ×5 knife contract; anything else (or an empty grid) stays ×10. Resizing
+// preserves staged items in order.
 function sizedForFirst(slots: Slot[]): Slot[] {
   const first = slots.find((s) => s.skin);
-  const target = first?.skin && isKnifeSkin(first.skin) ? KNIFE_COUNT : STANDARD_COUNT;
+  const target = first?.skin && isKnifeContract(first.skin) ? KNIFE_COUNT : STANDARD_COUNT;
   if (slots.length === target) return slots;
   const filled = slots.filter((s) => s.skin).slice(0, target);
   const out = makeSlots(target);
@@ -102,7 +138,6 @@ function skinFromInventory(item: InventoryItem): Skin {
     max_float: 1,
     collections: [],
     image: item.icon_url ?? undefined,
-    isKnife: isKnifeMarketName(item.name),
   };
 }
 
@@ -126,6 +161,8 @@ export function TradeupProvider({ children }: { children: React.ReactNode }) {
 
   const addFromInventory = useCallback((item: InventoryItem) => {
     const prev = slotsRef.current;
+    const elig = inventoryInputEligibility(item);
+    if (!elig.eligible) return { ok: false, reason: elig.reason };
     const skin = skinFromInventory(item);
     const stattrak = isStatTrakName(item.name);
     const first = prev.find((s) => s.skin);
@@ -142,7 +179,7 @@ export function TradeupProvider({ children }: { children: React.ReactNode }) {
     const next = [...prev];
     // Use the real per-item float once a deep sync has populated it; otherwise
     // fall back to the skin's min (synthetic until floats are resolved).
-    next[idx] = { skin, float: item.float ?? skin.min_float, stattrak };
+    next[idx] = { skin, float: item.float ?? skin.min_float, stattrak, price: item.price ?? null };
     setSlots(next); // auto-sizes to ×5 when this knife is the leading item
     return { ok: true };
   }, [setSlots]);

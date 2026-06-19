@@ -57,6 +57,12 @@ interface PriceMeta {
   lastSyncUpdated: number;
   totalKeys: number;
   realKeys: number;
+  // Catalog keys whose market_hash_name exists on at least one provider feed —
+  // i.e. the items that CAN be priced. The rest of the grid is wear×StatTrak
+  // combinations that don't trade on any market, so they're excluded from the
+  // "in-frame" coverage ceiling. Computed only on a full market-average sync;
+  // null until one has run.
+  priceableKeys?: number | null;
 }
 
 interface WorkItem {
@@ -103,14 +109,20 @@ function countReal(prices: PriceTable): number {
   return n;
 }
 
-function persist(prices: PriceTable, source: string, updatedCount: number): void {
+function persist(prices: PriceTable, source: string, updatedCount: number, priceableKeys?: number): void {
   writeFileSync(PRICES_FILE, JSON.stringify(prices));
+  // Carry forward the last known priceable count when this write didn't
+  // recompute it (a partial sync or a steam-direct flush).
+  const prev: PriceMeta | null = existsSync(META_FILE)
+    ? (JSON.parse(readFileSync(META_FILE, "utf8")) as PriceMeta)
+    : null;
   const meta: PriceMeta = {
     source,
     lastSync: Date.now(),
     lastSyncUpdated: updatedCount,
     totalKeys: Object.keys(prices).length,
     realKeys: countReal(prices),
+    priceableKeys: priceableKeys ?? prev?.priceableKeys ?? null,
   };
   writeFileSync(META_FILE, JSON.stringify(meta, null, 2));
 }
@@ -175,10 +187,16 @@ export async function syncMarketAverage(opts: MarketAvgOptions): Promise<AdminRe
     updated++;
   }
 
-  if (!opts.dryRun && updated > 0) persist(prices, "market-avg", updated);
+  // Priceable universe = keys present on ≥1 feed = everything we attempted that
+  // wasn't unmatched (matched now + already-priced skips). Only meaningful on a
+  // full run; a tag/wear-scoped run sees only a slice, so don't overwrite it.
+  const fullRun = !opts.tag && !opts.wear;
+  const priceable = fullRun ? work.length - unmatched : undefined;
+  if (!opts.dryRun && updated > 0) persist(prices, "market-avg", updated, priceable);
 
   const realKeys = countReal(prices);
   const totalKeys = Object.keys(prices).length;
+  const pct = (num: number, den: number) => (den ? Math.min(100, +((num / den) * 100).toFixed(2)) : 0);
   return {
     ok: true,
     data: {
@@ -187,12 +205,19 @@ export async function syncMarketAverage(opts: MarketAvgOptions): Promise<AdminRe
       failedProviders,
       catalogKeys: work.length,
       updated,
-      unmatched,
+      unmatched, // keys on NO feed — structurally unpriceable
       skipped,
       sourceHits, // how many items each provider contributed to
       dryRun: opts.dryRun,
       forced: opts.force,
-      coverage: { real: realKeys, total: totalKeys, percent: totalKeys ? +((realKeys / totalKeys) * 100).toFixed(2) : 0 },
+      coverage: {
+        real: realKeys,
+        total: totalKeys,
+        percent: pct(realKeys, totalKeys), // raw: priced / whole generated grid
+        // In-frame ceiling: priced / keys that actually exist on a feed.
+        priceable: priceable ?? null,
+        priceablePercent: priceable != null ? pct(realKeys, priceable) : null,
+      },
       note: "Each entry stores the per-source breakdown in `sources` and their mean in `median`. Restart the Next app to serve fresh prices.",
     },
   };
@@ -371,6 +396,18 @@ export function priceStatus(): AdminResult {
     : null;
   const lastSync = meta?.lastSync ?? null;
 
+  // Two frames of coverage:
+  //  · raw       = priced / every generated grid key (penalised by non-existent
+  //                wear×StatTrak combos we over-generate).
+  //  · priceable = priced / keys that actually exist on a feed. This is the
+  //                honest ceiling — ~100% means "everything that CAN be priced is".
+  // priceableKeys is recorded by the last full market-average sync; until one
+  // runs we can only show the raw frame.
+  const priceableKeys = meta?.priceableKeys ?? null;
+  const coverageRawPercent = totalKeys ? +((realKeys / totalKeys) * 100).toFixed(2) : 0;
+  const coveragePriceablePercent =
+    priceableKeys && priceableKeys > 0 ? Math.min(100, +((realKeys / priceableKeys) * 100).toFixed(2)) : null;
+
   return {
     ok: true,
     data: {
@@ -380,7 +417,12 @@ export function priceStatus(): AdminResult {
       realKeys,
       mockKeys: totalKeys - realKeys,
       multiSourceKeys: multiSource,
-      coveragePercent: totalKeys ? +((realKeys / totalKeys) * 100).toFixed(2) : 0,
+      priceableKeys,
+      unpriceableKeys: priceableKeys != null ? totalKeys - priceableKeys : null,
+      // Headline coverage prefers the priceable frame once it's known.
+      coveragePercent: coveragePriceablePercent ?? coverageRawPercent,
+      coverageRawPercent,
+      coveragePriceablePercent,
       lastSync,
       lastSyncAgeSec: lastSync ? Math.round((Date.now() - lastSync) / 1000) : null,
       fileBytes: st.size,

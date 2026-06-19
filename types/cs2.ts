@@ -7,8 +7,14 @@ export type Rarity =
   | "Restricted"
   | "Classified"
   | "Covert"
+  | "Extraordinary"
   | "Contraband";
 
+// Ladder order drives nextRarity(). "Extraordinary" is the Gold tier — the
+// knives/gloves a 5× Covert contract rolls — and sits directly above Covert so
+// nextRarity("Covert") resolves to it. Contraband stays at the top as a
+// non-tradeable one-off (M4A4 | Howl); nextRarity() returns null for the top
+// two tiers, so neither Extraordinary nor Contraband can be an input.
 export const RARITY_ORDER: Rarity[] = [
   "Consumer Grade",
   "Industrial Grade",
@@ -16,6 +22,7 @@ export const RARITY_ORDER: Rarity[] = [
   "Restricted",
   "Classified",
   "Covert",
+  "Extraordinary",
   "Contraband",
 ];
 

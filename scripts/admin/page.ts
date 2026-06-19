@@ -188,9 +188,19 @@ export function renderDashboard(base: string, token: string): string {
       H("st-coverage").textContent = d.coveragePercent + "%";
       H("st-file").textContent = fmtBytes(d.fileBytes);
       H("st-cov-bar").style.width = d.coveragePercent + "%";
-      H("st-cov-cap").textContent =
-        num(d.realKeys) + " priced / " + num(d.totalKeys) + " keys" +
-        (d.multiSourceKeys ? " · " + num(d.multiSourceKeys) + " blended" : "");
+      var blended = d.multiSourceKeys ? " · " + num(d.multiSourceKeys) + " blended" : "";
+      if (d.priceableKeys != null) {
+        // In-frame ceiling: priced / keys that exist on a feed. The rest of the
+        // grid is wear×StatTrak combos no market lists, so they don't count.
+        H("st-cov-cap").textContent =
+          num(d.realKeys) + " priced / " + num(d.priceableKeys) + " priceable · " +
+          num(d.unpriceableKeys) + " not on any feed" + blended;
+        H("st-coverage").title = d.coverageRawPercent + "% of all " + num(d.totalKeys) + " generated keys";
+      } else {
+        H("st-cov-cap").textContent =
+          num(d.realKeys) + " priced / " + num(d.totalKeys) + " keys · run a full sync for the priceable ceiling" + blended;
+        H("st-coverage").title = "raw coverage — run a market-average sync to compute the priceable frame";
+      }
     }
     var job = (d && d.job) || {};
     if (job.status === "running") { badge("SYNCING", "run"); progressDeterminate(job); }

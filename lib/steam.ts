@@ -37,6 +37,10 @@ export interface InventoryItem {
   // Median market price, resolved at read time from the price table by market
   // name + wear (see priceForMarketName). Null for items with no priced wear.
   price?: number | null;
+  // Per-marketplace prices that fed the median (e.g. { steam, skinport,
+  // buff163 }), attached alongside `price` so the inventory card's price modal
+  // can show each source. Absent/empty for items with no priced wear.
+  priceSources?: Record<string, number> | null;
 }
 
 interface SnapshotPayload {

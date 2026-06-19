@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { PriceTable, Skin } from "@/types/cs2";
+import type { PriceEntry, PriceTable, Skin } from "@/types/cs2";
 
 const DATA_DIR = join(process.cwd(), "public", "data");
 
@@ -73,11 +73,21 @@ const WEAR_NAMES = new Set([
 // Returns null for anything without a wear/price (cases, stickers, knives — the
 // catalog has no knives — agents, etc.).
 export function priceForMarketName(name: string | null | undefined): number | null {
+  return priceEntryForMarketName(name)?.median ?? null;
+}
+
+// Full price entry (median + per-source breakdown) for a raw inventory market
+// name. Same name->skin->`id|wear|tag` resolution as priceForMarketName, but
+// returns the whole entry so the UI can show each marketplace's price. Null for
+// anything without a priced wear.
+export function priceEntryForMarketName(
+  name: string | null | undefined,
+): PriceEntry | null {
   if (!name) return null;
   const wear = name.match(/\(([^)]+)\)\s*$/)?.[1];
   if (!wear || !WEAR_NAMES.has(wear)) return null;
   const skin = loadSkinByName().get(normalizeSkinName(name));
   if (!skin) return null;
   const tag = /StatTrak/i.test(name) ? "st" : "norm";
-  return loadPrices()[`${skin.id}|${wear}|${tag}`]?.median ?? null;
+  return loadPrices()[`${skin.id}|${wear}|${tag}`] ?? null;
 }

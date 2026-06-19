@@ -30,7 +30,9 @@ export const RARITY_HEX: Record<string, string> = {
   "High Grade": "#4b69ff",
   Remarkable: "#8847ff",
   Exotic: "#d32ce6",
-  Extraordinary: "#eb4b4b",
+  // Gold tier — knives/gloves rolled by a Covert contract. Gold, not Covert red,
+  // so trade-up outputs read as the special tier they are.
+  Extraordinary: "#e4ae39",
 };
 
 export function rarityHex(rarity: string | null | undefined): string {

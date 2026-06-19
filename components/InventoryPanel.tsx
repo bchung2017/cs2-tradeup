@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useTradeup, isStatTrakName } from "@/lib/tradeup-context";
+import { useTradeup, isStatTrakName, inventoryInputEligibility } from "@/lib/tradeup-context";
 import { rarityHex, usd } from "@/lib/display";
 import type { InventoryItem } from "@/lib/steam";
 
@@ -24,6 +24,57 @@ const RARITY_RANK: Record<string, number> = {
   Contraband: 6,
   Extraordinary: 7,
 };
+
+// Grid sort options surfaced in the SORT dropdown. The sink-sort that keeps
+// ineligible items at the bottom is always applied first (see `filtered`); the
+// chosen key here only orders items *within* the eligible/ineligible groups.
+type SortKey =
+  | "default"
+  | "rarity-desc"
+  | "rarity-asc"
+  | "price-desc"
+  | "price-asc"
+  | "float-desc"
+  | "float-asc";
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "default", label: "Default order" },
+  { key: "rarity-desc", label: "Rarity: high → low" },
+  { key: "rarity-asc", label: "Rarity: low → high" },
+  { key: "price-desc", label: "Price: high → low" },
+  { key: "price-asc", label: "Price: low → high" },
+  { key: "float-desc", label: "Float: high → low" },
+  { key: "float-asc", label: "Float: low → high" },
+];
+
+// Numeric compare with a fixed direction; null/undefined always sink last
+// regardless of direction (an unpriced / floatless / unranked item has no
+// meaningful position in the ordering, so it trails either way).
+function numCompare(a: number | null | undefined, b: number | null | undefined, dir: 1 | -1): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return (a - b) * dir;
+}
+
+function sortComparator(key: SortKey): (a: InventoryItem, b: InventoryItem) => number {
+  switch (key) {
+    case "rarity-desc":
+      return (a, b) => numCompare(RARITY_RANK[a.rarity ?? ""], RARITY_RANK[b.rarity ?? ""], -1);
+    case "rarity-asc":
+      return (a, b) => numCompare(RARITY_RANK[a.rarity ?? ""], RARITY_RANK[b.rarity ?? ""], 1);
+    case "price-desc":
+      return (a, b) => numCompare(a.price, b.price, -1);
+    case "price-asc":
+      return (a, b) => numCompare(a.price, b.price, 1);
+    case "float-desc":
+      return (a, b) => numCompare(a.float, b.float, -1);
+    case "float-asc":
+      return (a, b) => numCompare(a.float, b.float, 1);
+    default:
+      return () => 0;
+  }
+}
 
 const STATUS_COLOR: Record<StatusClass, string> = {
   ok: "var(--profit)",
@@ -79,6 +130,10 @@ export default function InventoryPanel() {
   // SYNC while `input` matches this, and reverts to LOAD once the text is edited.
   const [loadedInput, setLoadedInput] = useState<string | null>(null);
   const [rarityFilter, setRarityFilter] = useState<string>("ALL");
+  const [sortKey, setSortKey] = useState<SortKey>("default");
+  // Item whose price breakdown modal is open (null = closed). Set by clicking a
+  // priced inventory card's price; cleared by the modal's backdrop/close.
+  const [priceModalItem, setPriceModalItem] = useState<InventoryItem | null>(null);
 
   const steamidRef = useRef<string | null>(null);
   steamidRef.current = steamid;
@@ -114,6 +169,14 @@ export default function InventoryPanel() {
   // Click an item to move it into the next trade-up slot (it then leaves the grid).
   const onItemClick = useCallback(
     (it: InventoryItem) => {
+      // Fundamentally ineligible items (medals, cases, agents, Covert, …) are
+      // rendered disabled below; a click here is a no-op beyond a quiet,
+      // non-alarming reconfirmation of why it can't go into a contract.
+      const elig = inventoryInputEligibility(it);
+      if (!elig.eligible) {
+        setMsg(elig.reason ?? "not a trade-up input", "dim");
+        return;
+      }
       const r = addFromInventory(it);
       if (!r.ok) setMsg(r.reason ?? "could not add", "warn");
     },
@@ -257,13 +320,22 @@ export default function InventoryPanel() {
   const effectiveRarity = lockedRarity ?? rarityFilter;
 
   // Items shown in the grid, narrowed by the locked/selected rarity and (when
-  // locked) the StatTrak state of the staged contract.
+  // locked) the StatTrak state of the staged contract. Ineligible items (medals,
+  // ★ knives/gloves, etc.) sink to the bottom so the selectable items lead; the
+  // sort is stable, preserving the original order within each group.
   const filtered = useMemo(() => {
     let out = available;
     if (effectiveRarity !== "ALL") out = out.filter((it) => it.rarity === effectiveRarity);
     if (lock) out = out.filter((it) => isStatTrakName(it.name) === lock.stattrak);
-    return out;
-  }, [available, effectiveRarity, lock]);
+    const cmp = sortComparator(sortKey);
+    return [...out].sort(
+      (a, b) =>
+        // Primary: ineligible items sink to the bottom. Secondary: the chosen
+        // sort orders items within each group (stable for "default").
+        Number(!inventoryInputEligibility(a).eligible) -
+          Number(!inventoryInputEligibility(b).eligible) || cmp(a, b),
+    );
+  }, [available, effectiveRarity, lock, sortKey]);
 
   return (
     <>
@@ -288,64 +360,30 @@ export default function InventoryPanel() {
         >
           {/* lerped fill pinned to the very top of the header, runs during any sync */}
           <SyncFill active={loading || syncing} />
-          <header>
-            <span className="hud hud-ember">STEAM INVENTORY LOADER</span>
-            <h1
-              className="glow"
-              style={{
-                fontFamily: "var(--mono)",
-                fontWeight: 700,
-                fontSize: 22,
-                margin: "4px 0 0",
-                letterSpacing: "-0.01em",
-                color: "var(--green)",
-              }}
-            >
-              <span style={{ color: "var(--green-dim)" }}>$ </span>
-              loader
-              <span style={{ color: "var(--green-faint)", fontWeight: 400 }}> --cs2</span>
-              <sup style={{ fontSize: 14, fontWeight: 400, color: "var(--green-dim)" }}> 730:2</sup>
-            </h1>
+          <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 14 }}>
+            <div>
+              <span className="hud hud-ember">STEAM INVENTORY LOADER</span>
+              <h1
+                className="glow"
+                style={{
+                  fontFamily: "var(--mono)",
+                  fontWeight: 700,
+                  fontSize: 22,
+                  margin: "4px 0 0",
+                  letterSpacing: "-0.01em",
+                  color: "var(--green)",
+                }}
+              >
+                <span style={{ color: "var(--green-dim)" }}>$ </span>
+                loader
+                <span style={{ color: "var(--green-faint)", fontWeight: 400 }}> --cs2</span>
+                <sup style={{ fontSize: 14, fontWeight: 400, color: "var(--green-dim)" }}> 730:2</sup>
+              </h1>
+            </div>
+            {/* The loaded profile's avatar lives here — this is the user's side
+                (their owned items); the left panel is the algorithm interface. */}
+            <ProfilePic />
           </header>
-
-          {/* last-synced freshness — green when within the 60s floor, an obvious
-              red "STALE" banner once the snapshot ages past it. */}
-          {syncedAt != null &&
-            (() => {
-              const stale = now - syncedAt >= STALE_MS;
-              return (
-                <div
-                  className="hud"
-                  style={{
-                    marginTop: 14,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "6px 10px",
-                    border: `1px solid ${stale ? "var(--loss)" : "var(--green-dim)"}`,
-                    background: stale ? "rgba(255,90,90,0.10)" : "transparent",
-                    color: stale ? "var(--loss)" : "var(--green)",
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: "50%",
-                      background: stale ? "var(--loss)" : "var(--green)",
-                      boxShadow: `0 0 6px ${stale ? "var(--loss)" : "var(--green)"}`,
-                      flexShrink: 0,
-                    }}
-                  />
-                  {stale ? "STALE" : "FRESH"} · last synced {relativeAge(now - syncedAt)}
-                  {stale && (
-                    <span style={{ marginLeft: "auto", color: "var(--cream-dim)" }}>
-                      hit SYNC to refresh
-                    </span>
-                  )}
-                </div>
-              );
-            })()}
 
           {/* resolve + sync bar */}
           <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
@@ -414,8 +452,43 @@ export default function InventoryPanel() {
                   {lockedRarity ? "LOCKED // " : ""}
                   {filtered.length} SHOWN
                 </span>
+                <span className="hud" style={{ marginLeft: "auto" }}>
+                  SORT
+                </span>
+                <select
+                  value={sortKey}
+                  onChange={(e) => setSortKey(e.target.value as SortKey)}
+                  title="Order the inventory grid"
+                  style={{
+                    background: "var(--void)",
+                    color: "var(--amber)",
+                    border: "1px solid var(--surface-line)",
+                    padding: "4px 8px",
+                    fontFamily: "var(--mono)",
+                    fontSize: 11,
+                    letterSpacing: "0.08em",
+                    outline: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  {SORT_OPTIONS.map((o) => (
+                    <option
+                      key={o.key}
+                      value={o.key}
+                      style={{ background: "var(--void)", color: "var(--amber)" }}
+                    >
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {/* Tooltip lives on the wrapper because a disabled <button>
+                  suppresses its own title on hover — so the locked message
+                  would never show on the chips themselves. */}
+              <div
+                style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
+                title={lockedRarity ? "Locked by selected item" : undefined}
+              >
                 {[
                   { key: "ALL", label: "ALL", count: available.length, color: "var(--green)" },
                   ...rarities.map((r) => ({
@@ -431,7 +504,7 @@ export default function InventoryPanel() {
                       key={chip.key}
                       onClick={() => setRarityFilter(chip.key)}
                       disabled={!!lockedRarity}
-                      title={lockedRarity ? "Rarity locked by the staged contract" : `Show ${chip.label}`}
+                      title={lockedRarity ? "Locked by selected item" : `Show ${chip.label}`}
                       style={{
                         display: "inline-flex",
                         alignItems: "center",
@@ -475,24 +548,57 @@ export default function InventoryPanel() {
               gap: 10,
             }}
           >
-            {filtered.map((it) => (
+            {filtered.map((it) => {
+              const elig = inventoryInputEligibility(it);
+              const ineligible = !elig.eligible;
+              return (
               <div
                 key={it.assetid}
                 onClick={() => onItemClick(it)}
-                title="Click to add to trade-up"
+                title={ineligible ? elig.reason : "Click to add to trade-up"}
+                aria-disabled={ineligible}
                 style={{
+                  position: "relative",
                   background: "var(--surface)",
-                  border: `4px solid ${rarityHex(it.rarity)}`,
+                  // Ineligible tiles drop their rarity accent for a muted line,
+                  // a subtle visual demotion from the selectable items.
+                  border: `4px solid ${ineligible ? "var(--surface-line)" : rarityHex(it.rarity)}`,
                   padding: 12,
-                  cursor: "pointer",
+                  cursor: ineligible ? "not-allowed" : "pointer",
+                  opacity: ineligible ? 0.45 : 1,
                 }}
               >
+                {ineligible && (
+                  <span
+                    className="hud"
+                    title={elig.reason}
+                    style={{
+                      position: "absolute",
+                      top: 6,
+                      right: 6,
+                      padding: "1px 5px",
+                      letterSpacing: "0.12em",
+                      color: "var(--cream-dim)",
+                      border: "1px solid var(--surface-line)",
+                      background: "var(--void)",
+                    }}
+                  >
+                    N/A
+                  </span>
+                )}
                 {it.icon_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={it.icon_url}
                     alt={it.name ?? "item"}
-                    style={{ width: "100%", height: 90, objectFit: "contain" }}
+                    style={{
+                      width: "100%",
+                      height: 90,
+                      objectFit: "contain",
+                      // Desaturate ineligible items so the grid reads selectable
+                      // vs not at a glance, without hiding anything.
+                      filter: ineligible ? "grayscale(1)" : "none",
+                    }}
                   />
                 ) : (
                   <div style={{ height: 90 }} />
@@ -501,28 +607,70 @@ export default function InventoryPanel() {
                   {it.name ?? "(unnamed)"}
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                  {/* Grade: an uppercase, wide-tracked amber HUD label. */}
                   <span className="hud hud-amber">{it.rarity ?? "—"}</span>
-                  {/* Float comes from the inventory feed's asset_properties. */}
+                  {/* Float: deliberately NOT a HUD label — a tight, tabular green
+                      number so the precise wear value reads distinctly from the
+                      grade category beside it. */}
                   {it.float != null && (
-                    <span className="hud" style={{ color: "var(--amber)" }} title="Float (wear value)">
+                    <span
+                      title="Float (wear value)"
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontVariantNumeric: "tabular-nums",
+                        fontSize: 12,
+                        letterSpacing: "0.01em",
+                        color: "var(--green)",
+                      }}
+                    >
                       {it.float.toFixed(4)}
                     </span>
                   )}
                 </div>
-                {/* Median market price, resolved from the price table by name + wear. */}
-                <div
-                  className="hud"
-                  style={{
-                    marginTop: 4,
-                    textAlign: "right",
-                    color: it.price != null ? "var(--green)" : "var(--cream-dim)",
-                  }}
-                  title="Median market price"
-                >
-                  {it.price != null ? usd(it.price) : "no price"}
-                </div>
+                {/* Median market price. When priced, it's a button: clicking it
+                    (without staging the item) opens a per-marketplace breakdown.
+                    stopPropagation keeps the tile's add-to-trade-up from firing. */}
+                {it.price != null ? (
+                  <button
+                    type="button"
+                    className="hud"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPriceModalItem(it);
+                    }}
+                    title="Compare prices across marketplaces"
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      marginTop: 4,
+                      padding: 0,
+                      background: "transparent",
+                      border: "none",
+                      textAlign: "right",
+                      color: "var(--green)",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                      textDecorationStyle: "dotted",
+                      textUnderlineOffset: 3,
+                      textDecorationColor: "var(--green-dim)",
+                      font: "inherit",
+                      letterSpacing: "inherit",
+                    }}
+                  >
+                    {usd(it.price)}
+                  </button>
+                ) : (
+                  <div
+                    className="hud"
+                    style={{ marginTop: 4, textAlign: "right", color: "var(--cream-dim)" }}
+                    title="No market price for this item"
+                  >
+                    no price
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -531,8 +679,338 @@ export default function InventoryPanel() {
             NO SNAPSHOT — LOAD A PROFILE FIRST
           </div>
         )}
+
+        {/* freshness — a quiet footer line, never an alarm. Fresh reads
+            green-dim; past the 60s floor it just softens to amber (a gentle
+            nudge to re-sync, not a warning). Lives at the bottom, out of the way. */}
+        {syncedAt != null &&
+          (() => {
+            const stale = now - syncedAt >= STALE_MS;
+            const tone = stale ? "var(--amber)" : "var(--green-dim)";
+            return (
+              <div
+                className="hud"
+                style={{
+                  marginTop: 22,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 7,
+                  fontSize: 11,
+                  color: "var(--cream-dim)",
+                  opacity: 0.7,
+                }}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: tone,
+                    boxShadow: `0 0 5px ${tone}`,
+                    flexShrink: 0,
+                  }}
+                />
+                last synced {relativeAge(now - syncedAt)}
+                {stale && <span>· hit SYNC to refresh</span>}
+              </div>
+            );
+          })()}
       </main>
+
+      {priceModalItem && (
+        <PriceModal item={priceModalItem} onClose={() => setPriceModalItem(null)} />
+      )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Price breakdown modal — opens from an inventory card's price. Lists Steam +
+// third-party marketplaces, each with the price we have on file (Steam /
+// Skinport / Buff163 come from the synced sources; the rest are link-only) and
+// a click-through to that marketplace's listing for this exact item (the full
+// market_hash_name already encodes the skin, wear, and StatTrak/Souvenir tag).
+// ---------------------------------------------------------------------------
+
+interface Marketplace {
+  key: string;
+  label: string;
+  color: string;
+  // Builds the listing URL for a raw inventory market_hash_name.
+  url: (marketHashName: string) => string;
+}
+
+const MARKETPLACES: Marketplace[] = [
+  {
+    key: "steam",
+    label: "Steam",
+    color: "#66c0f4",
+    url: (n) => `https://steamcommunity.com/market/listings/730/${encodeURIComponent(n)}`,
+  },
+  {
+    key: "buff163",
+    label: "Buff163",
+    color: "#f0a500",
+    url: (n) =>
+      `https://buff.163.com/market/csgo#tab=selling&page_num=1&search=${encodeURIComponent(n)}`,
+  },
+  {
+    key: "skinport",
+    label: "Skinport",
+    color: "#fa490a",
+    url: (n) => `https://skinport.com/market?search=${encodeURIComponent(stripTags(n))}`,
+  },
+  {
+    key: "csfloat",
+    label: "CSFloat",
+    color: "#a78bfa",
+    url: (n) => `https://csfloat.com/search?market_hash_name=${encodeURIComponent(n)}`,
+  },
+  {
+    key: "dmarket",
+    label: "DMarket",
+    color: "#27c281",
+    url: (n) => `https://dmarket.com/ingame-items/item-list/csgo-skins?title=${encodeURIComponent(stripTags(n))}`,
+  },
+];
+
+// Strip ★ / StatTrak™ / Souvenir / "(Wear)" for marketplaces whose search reads
+// a plain skin name rather than the full Steam market_hash_name.
+function stripTags(name: string): string {
+  return name
+    .replace(/^★\s*/, "")
+    .replace(/^StatTrak™?\s*/i, "")
+    .replace(/^Souvenir\s*/i, "")
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .trim();
+}
+
+function PriceModal({ item, onClose }: { item: InventoryItem; onClose: () => void }) {
+  // Esc closes; restore nothing else (the grid stays mounted behind the scrim).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const name = item.name ?? "";
+  const sources = item.priceSources ?? {};
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        background: "rgba(0,0,0,0.72)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(440px, 100%)",
+          background: "var(--surface)",
+          border: "1px solid var(--surface-line)",
+          boxShadow: "0 0 0 1px rgba(0,0,0,0.6), 0 16px 60px rgba(0,0,0,0.8)",
+          padding: "18px 20px 20px",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+          <div>
+            <span className="hud hud-ember">MARKET PRICES</span>
+            <div style={{ fontSize: 14, marginTop: 6, color: "var(--cream)", lineHeight: 1.35 }}>
+              {name || "(unnamed)"}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--surface-line)",
+              color: "var(--cream-dim)",
+              cursor: "pointer",
+              padding: "2px 9px",
+              fontFamily: "var(--mono)",
+              fontSize: 14,
+              lineHeight: 1.2,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div
+          style={{
+            marginTop: 16,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(118px, 1fr))",
+            gap: 10,
+          }}
+        >
+          {MARKETPLACES.map((m) => {
+            const price = sources[m.key];
+            return (
+              <a
+                key={m.key}
+                href={m.url(name)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Open ${m.label} listing in a new tab`}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 6,
+                  textDecoration: "none",
+                  padding: "12px 8px",
+                  background: "var(--void)",
+                  border: "1px solid var(--surface-line)",
+                  borderTop: `3px solid ${m.color}`,
+                  color: "var(--cream)",
+                }}
+              >
+                {/* Lettermark "icon" — brand-tinted disc, no external assets. */}
+                <span
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: "50%",
+                    background: m.color,
+                    color: "var(--void)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontFamily: "var(--mono)",
+                    fontWeight: 700,
+                    fontSize: 15,
+                  }}
+                >
+                  {m.label[0]}
+                </span>
+                <span className="hud" style={{ color: "var(--cream-dim)" }}>{m.label}</span>
+                <span
+                  style={{
+                    fontFamily: "var(--mono)",
+                    fontVariantNumeric: "tabular-nums",
+                    fontSize: 13,
+                    color: price != null ? "var(--green)" : "var(--cream-dim)",
+                  }}
+                >
+                  {price != null ? usd(price) : "view →"}
+                </span>
+              </a>
+            );
+          })}
+        </div>
+
+        <div style={{ marginTop: 14, fontSize: 11, color: "var(--cream-dim)", opacity: 0.7, lineHeight: 1.4 }}>
+          Prices shown are the last synced values; icons open the live listing for this
+          exact wear in a new tab.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Profile-picture loader pinned to the inventory header (the user's side: this
+// is whose owned items the grid shows). Pulls the loaded profile's Steam avatar
+// from shared context and shows a phosphor pulse while it resolves, the avatar
+// once loaded, and a dim placeholder when there's no profile or the lookup fails.
+function ProfilePic() {
+  const { steamid } = useTradeup();
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+
+  useEffect(() => {
+    if (!steamid) {
+      setAvatar(null);
+      setState("idle");
+      return;
+    }
+    let cancelled = false;
+    setState("loading");
+    setAvatar(null);
+    fetch(`/api/avatar/${steamid}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { avatar?: string }) => {
+        if (cancelled) return;
+        if (d.avatar) {
+          setAvatar(d.avatar);
+          setState("idle");
+        } else {
+          setState("error");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [steamid]);
+
+  const SIZE = 54;
+  return (
+    <div
+      title={steamid ? `steam profile ${steamid}` : "no profile loaded"}
+      style={{
+        width: SIZE,
+        height: SIZE,
+        flexShrink: 0,
+        position: "relative",
+        overflow: "hidden",
+        border: `1px solid ${avatar ? "var(--green)" : "var(--green-faint)"}`,
+        background: "var(--void)",
+        boxShadow: avatar ? "0 0 8px rgba(51,255,51,0.35)" : "none",
+      }}
+    >
+      <style>{`@keyframes pp-pulse{0%,100%{opacity:.25}50%{opacity:.7}}`}</style>
+      {avatar ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={avatar}
+          alt="profile"
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+      ) : state === "loading" ? (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            background:
+              "linear-gradient(135deg, rgba(51,255,51,0.05), rgba(51,255,51,0.28), rgba(51,255,51,0.05))",
+            animation: "pp-pulse 1.1s ease-in-out infinite",
+          }}
+        />
+      ) : (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: state === "error" ? "var(--loss)" : "var(--green-faint)",
+            fontFamily: "var(--mono)",
+            fontSize: 18,
+          }}
+        >
+          {state === "error" ? "✕" : "☻"}
+        </div>
+      )}
+    </div>
   );
 }
 

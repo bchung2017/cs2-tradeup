@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSnapshot } from "@/lib/steam";
-import { priceForMarketName } from "@/lib/data";
+import { priceEntryForMarketName } from "@/lib/data";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +18,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ steamid: strin
   );
   // Attach a median market price per item (resolved from the price table by
   // market name + wear) so the inventory cards can show float AND price.
-  const items = snap.items.map((it) => ({ ...it, price: priceForMarketName(it.name) }));
+  const items = snap.items.map((it) => {
+    const entry = priceEntryForMarketName(it.name);
+    return { ...it, price: entry?.median ?? null, priceSources: entry?.sources ?? null };
+  });
   const priced = items.filter((i) => i.price != null).length;
   console.log(`[inventory] ${priced}/${snap.count} items priced`);
   return NextResponse.json({

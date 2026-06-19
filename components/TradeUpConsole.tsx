@@ -34,19 +34,11 @@ export default function TradeUpConsole() {
     setSlots((prev) => {
       const next = [...prev];
       // Catalog picks carry no StatTrak; inherit the contract's current state.
-      next[i] = { skin, float: skin.min_float, stattrak: prev.find((s) => s.skin)?.stattrak ?? false };
+      // No market price is resolved for catalog picks, so price stays null.
+      next[i] = { skin, float: skin.min_float, stattrak: prev.find((s) => s.skin)?.stattrak ?? false, price: null };
       return next;
     });
     setPickerFor(null);
-    setResult(null);
-  }
-
-  function setFloat(i: number, v: number) {
-    setSlots((prev) => {
-      const next = [...prev];
-      next[i] = { ...next[i], float: v };
-      return next;
-    });
     setResult(null);
   }
 
@@ -111,9 +103,7 @@ export default function TradeUpConsole() {
         }}
       >
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <ProfilePic />
-          <div>
+        <div>
           <span className="hud hud-ember">TRADE-UP CONSOLE</span>
           <h1
             className="glow"
@@ -129,7 +119,6 @@ export default function TradeUpConsole() {
             <span style={{ color: "var(--green-dim)" }}>$ </span>
             tradeup
           </h1>
-          </div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
           {/* contract size auto-derives from the first staged item: a knife → ×5,
@@ -188,28 +177,12 @@ export default function TradeUpConsole() {
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <span className="hud">{String(i + 1).padStart(2, "0")}</span>
-              {slot.skin && (
-                <button
-                  onClick={() => clearSlot(i)}
-                  title="Remove"
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "var(--cream-dim)",
-                    fontSize: 14,
-                    lineHeight: 1,
-                    padding: 0,
-                  }}
-                >
-                  ×
-                </button>
-              )}
             </div>
 
             {slot.skin ? (
               <>
                 {/* Click the staged item to clear the slot — inventory items
-                    return to the right-side grid (the × button does the same). */}
+                    return to the right-side grid. */}
                 <div
                   onClick={() => clearSlot(i)}
                   role="button"
@@ -234,35 +207,56 @@ export default function TradeUpConsole() {
                     <div style={{ fontSize: 11, lineHeight: 1.2 }}>{slot.skin.name}</div>
                   </div>
                 </div>
-                <input
-                  type="number"
-                  min={slot.skin.min_float}
-                  max={slot.skin.max_float}
-                  step={0.001}
-                  value={slot.float}
-                  onChange={(e) => setFloat(i, Number(e.target.value))}
-                  style={{
-                    width: "100%",
-                    background: "var(--void)",
-                    border: "1px solid var(--line)",
-                    color: "var(--amber)",
-                    fontSize: 11,
-                    padding: "3px 5px",
-                    outline: "none",
-                  }}
-                />
+                {/* Float is fixed by the staged item — read-only here. The full
+                    value is shown (no rounding/truncation) so nothing is hidden. */}
                 <div
-                  title="exact float"
+                  title="float (wear) — set by the item, not editable"
                   style={{
-                    fontSize: 9,
-                    color: "var(--cream-dim)",
-                    fontFamily: "var(--mono)",
-                    wordBreak: "break-all",
-                    lineHeight: 1.25,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    gap: 6,
                     marginTop: 3,
                   }}
                 >
-                  {String(slot.float)}
+                  <span className="hud" style={{ color: "var(--cream-dim)", fontSize: 8 }}>
+                    FLOAT
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--mono)",
+                      fontSize: 11,
+                      color: "var(--amber)",
+                      wordBreak: "break-all",
+                      textAlign: "right",
+                    }}
+                  >
+                    {String(slot.float)}
+                  </span>
+                </div>
+                {/* Per-input market price, carried from the inventory feed
+                    (null for catalog picks / unpriced wears). */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "baseline",
+                    marginTop: 1,
+                  }}
+                  title="Median market price of this input"
+                >
+                  <span className="hud" style={{ color: "var(--cream-dim)", fontSize: 8 }}>
+                    PRICE
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: "var(--mono)",
+                      fontSize: 11,
+                      color: slot.price != null ? "var(--green)" : "var(--cream-dim)",
+                    }}
+                  >
+                    {slot.price != null ? usd(slot.price) : "—"}
+                  </span>
                 </div>
               </>
             ) : (
@@ -344,98 +338,6 @@ export default function TradeUpConsole() {
       />
     </main>
     </>
-  );
-}
-
-// Profile-picture loader pinned to the top-left header: pulls the loaded
-// profile's Steam avatar (mirrored into shared context from the inventory side)
-// and shows a phosphor pulse while it resolves, the avatar once loaded, and a
-// dim placeholder when there's no profile or the lookup fails.
-function ProfilePic() {
-  const { steamid } = useTradeup();
-  const [avatar, setAvatar] = useState<string | null>(null);
-  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
-
-  useEffect(() => {
-    if (!steamid) {
-      setAvatar(null);
-      setState("idle");
-      return;
-    }
-    let cancelled = false;
-    setState("loading");
-    setAvatar(null);
-    fetch(`/api/avatar/${steamid}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { avatar?: string }) => {
-        if (cancelled) return;
-        if (d.avatar) {
-          setAvatar(d.avatar);
-          setState("idle");
-        } else {
-          setState("error");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setState("error");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [steamid]);
-
-  const SIZE = 54;
-  return (
-    <div
-      title={steamid ? `steam profile ${steamid}` : "no profile loaded"}
-      style={{
-        width: SIZE,
-        height: SIZE,
-        flexShrink: 0,
-        position: "relative",
-        overflow: "hidden",
-        border: `1px solid ${avatar ? "var(--green)" : "var(--green-faint)"}`,
-        background: "var(--void)",
-        boxShadow: avatar ? "0 0 8px rgba(51,255,51,0.35)" : "none",
-      }}
-    >
-      <style>{`@keyframes pp-pulse{0%,100%{opacity:.25}50%{opacity:.7}}`}</style>
-      {avatar ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={avatar}
-          alt="profile"
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
-      ) : state === "loading" ? (
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: 0,
-            background:
-              "linear-gradient(135deg, rgba(51,255,51,0.05), rgba(51,255,51,0.28), rgba(51,255,51,0.05))",
-            animation: "pp-pulse 1.1s ease-in-out infinite",
-          }}
-        />
-      ) : (
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: state === "error" ? "var(--loss)" : "var(--green-faint)",
-            fontFamily: "var(--mono)",
-            fontSize: 18,
-          }}
-        >
-          {state === "error" ? "✕" : "☻"}
-        </div>
-      )}
-    </div>
   );
 }
 
