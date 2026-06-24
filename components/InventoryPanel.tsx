@@ -555,6 +555,7 @@ export default function InventoryPanel() {
               return (
               <div
                 key={it.assetid}
+                className="card-hover"
                 onClick={() => onItemClick(it)}
                 title={ineligible ? elig.reason : "Click to add to trade-up"}
                 aria-disabled={ineligible}

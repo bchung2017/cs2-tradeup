@@ -171,7 +171,7 @@ export default function TradeUpConsole() {
         {slots.map((slot, i) => (
           <div
             key={i}
-            className="bracket"
+            className={slot.skin ? "bracket card-hover" : "bracket"}
             style={{
               border: slot.skin
                 ? `3px solid ${rarityHex(slot.skin.rarity.name)}`
@@ -642,7 +642,7 @@ function OutcomeCard({
   return (
     <div
       ref={cardRef}
-      className="bracket"
+      className="bracket card-hover"
       onClick={openPrice}
       style={{
         position: "relative",
