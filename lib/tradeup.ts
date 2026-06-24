@@ -169,7 +169,7 @@ export function computeTradeup(args: ComputeArgs): TradeupResult {
   }
   if (pricedProb < 0.999) {
     warnings.push(
-      `Only ${(pricedProb * 100).toFixed(1)}% of outcome probability has price data; EV is a lower bound.`,
+      `Only ${(pricedProb * 100).toFixed(1)}% of outcome probability has price data; the average payout is a lower bound.`,
     );
   }
 

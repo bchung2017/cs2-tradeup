@@ -417,9 +417,9 @@ function Outcomes({
     >
       <div style={{ display: "flex", gap: 28, alignItems: "baseline", flexWrap: "wrap" }}>
         <Stat label="INPUT COST" value={usd(result.inputCost)} />
-        <Stat label="EXPECTED VALUE" value={usd(result.expectedValue)} />
+        <Stat label="AVERAGE PAYOUT" value={usd(result.expectedValue)} />
         <Stat
-          label="EV − COST"
+          label="AVERAGE PROFIT"
           value={signedUsd(result.profitEV)}
           color={profitable ? "var(--profit)" : "var(--loss)"}
         />
@@ -753,6 +753,13 @@ function ResultViz({
   const pcs = (p: number) => `${((p / totalProb) * 100).toFixed(1)}%`;
   const evMax = Math.max(inputCost, expectedValue, 0.01);
 
+  // Breakdown legend is collapsed by default — the donut carries the at-a-glance
+  // read; the per-item list expands on demand. Hovering a legend row lights up
+  // that item's donut slice (hover takes precedence over the click-selection).
+  const [legendOpen, setLegendOpen] = useState(false);
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const focusIdx = hoveredIdx ?? selectedIdx; // which slice is "lit" right now
+
   return (
     <div
       style={{
@@ -773,15 +780,15 @@ function ResultViz({
         <div style={{ display: "flex", justifyContent: "center" }}>
           <svg viewBox="0 0 160 160" style={{ width: 200, height: 200, flexShrink: 0 }}>
             {slices.map((s) => {
-              const active = selectedIdx === s.idx;
+              const lit = focusIdx === s.idx;
               return (
                 <path
                   key={`${s.o.skin.id}-${s.o.outputWear}`}
-                  d={arcPath(80, 80, active ? 79 : 76, s.start, s.end)}
+                  d={arcPath(80, 80, lit ? 79 : 76, s.start, s.end)}
                   fill={s.color}
                   stroke="var(--void)"
                   strokeWidth={1}
-                  opacity={selectedIdx == null || active ? 1 : 0.35}
+                  opacity={focusIdx == null || lit ? 1 : 0.35}
                   onClick={() => onSelect(s.idx)}
                   style={{ cursor: "pointer", transition: "opacity 0.2s" }}
                 >
@@ -798,17 +805,45 @@ function ResultViz({
             </text>
           </svg>
         </div>
-        {/* Full legend — no scroll, no truncation, every title shown in full.
-            Each row jumps to + highlights its outcome card below. The section
-            grows with the outcome count instead of hiding rows behind a scroll. */}
-        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 2 }}>
+        {/* Collapsible breakdown — collapsed by default so the donut leads.
+            Toggling reveals the full per-item list (no scroll, no truncation);
+            each row jumps to + highlights its outcome card below, and hovering a
+            row lights up that item's donut slice above. */}
+        <button
+          type="button"
+          onClick={() => setLegendOpen((v) => !v)}
+          aria-expanded={legendOpen}
+          className="hud"
+          style={{
+            marginTop: 14,
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+            background: "transparent",
+            border: "1px solid var(--line)",
+            padding: "6px 8px",
+            cursor: "pointer",
+            color: "var(--cream-dim)",
+          }}
+        >
+          <span>{legendOpen ? "▾" : "▸"} BREAKDOWN</span>
+          <span className="hud-ember">{slices.length} ITEMS</span>
+        </button>
+        {legendOpen && (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 2 }}>
           {slices.map((s) => {
-            const active = selectedIdx === s.idx;
+            const lit = focusIdx === s.idx;
             return (
               <button
                 type="button"
                 key={`${s.o.skin.id}-${s.o.outputWear}`}
                 onClick={() => onSelect(s.idx)}
+                onMouseEnter={() => setHoveredIdx(s.idx)}
+                onMouseLeave={() => setHoveredIdx(null)}
+                onFocus={() => setHoveredIdx(s.idx)}
+                onBlur={() => setHoveredIdx(null)}
                 title="Jump to this outcome"
                 style={{
                   display: "flex",
@@ -816,14 +851,14 @@ function ResultViz({
                   gap: 8,
                   width: "100%",
                   textAlign: "left",
-                  background: active ? "var(--surface-2)" : "transparent",
+                  background: lit ? "var(--surface-2)" : "transparent",
                   border: "none",
-                  borderLeft: `3px solid ${active ? s.color : "transparent"}`,
+                  borderLeft: `3px solid ${lit ? s.color : "transparent"}`,
                   padding: "4px 7px",
                   cursor: "pointer",
                   fontSize: 11,
                   lineHeight: 1.35,
-                  color: active ? "var(--cream)" : "var(--cream-dim)",
+                  color: lit ? "var(--cream)" : "var(--cream-dim)",
                   transition: "background 0.15s, color 0.15s",
                 }}
               >
@@ -846,6 +881,7 @@ function ResultViz({
             );
           })}
         </div>
+        )}
       </div>
 
       {/* profit chance + value comparison */}
@@ -886,9 +922,9 @@ function ResultViz({
         </div>
 
         <div>
-          <div className="hud" style={{ marginBottom: 8 }}>INPUT COST vs EXPECTED VALUE</div>
+          <div className="hud" style={{ marginBottom: 8 }}>INPUT COST vs AVERAGE PAYOUT</div>
           <ValueBar label="COST" value={inputCost} max={evMax} color="var(--loss)" />
-          <ValueBar label="EV" value={expectedValue} max={evMax} color="var(--profit)" />
+          <ValueBar label="PAYOUT" value={expectedValue} max={evMax} color="var(--profit)" />
         </div>
       </div>
     </div>

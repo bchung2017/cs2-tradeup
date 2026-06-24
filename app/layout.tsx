@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "CS2 Journeyman · Trade-Up Console",
-  description: "Single trade-up analysis. Probability, float, EV.",
+  description: "Single trade-up analysis. Probability, float, average payout.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
