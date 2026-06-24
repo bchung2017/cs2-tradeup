@@ -128,10 +128,14 @@ function BrandIcon({ m }: { m: Marketplace }) {
 
 export default function PriceModal({
   name,
+  image,
   priceSources,
   onClose,
 }: {
   name: string;
+  // Item picture (skin icon). Optional — catalog picks may have none, in which
+  // case the header just shows the name.
+  image?: string | null;
   priceSources?: Record<string, number> | null;
   onClose: () => void;
 }) {
@@ -177,10 +181,27 @@ export default function PriceModal({
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-          <div>
-            <span className="hud hud-ember">MARKET PRICES</span>
-            <div style={{ fontSize: 14, marginTop: 6, color: "var(--cream)", lineHeight: 1.35 }}>
-              {name || "(unnamed)"}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {image && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={image}
+                alt=""
+                style={{
+                  width: 56,
+                  height: 56,
+                  flexShrink: 0,
+                  objectFit: "contain",
+                  background: "var(--void)",
+                  border: "1px solid var(--surface-line)",
+                }}
+              />
+            )}
+            <div>
+              <span className="hud hud-ember">MARKET PRICES</span>
+              <div style={{ fontSize: 14, marginTop: 6, color: "var(--cream)", lineHeight: 1.35 }}>
+                {name || "(unnamed)"}
+              </div>
             </div>
           </div>
           <button

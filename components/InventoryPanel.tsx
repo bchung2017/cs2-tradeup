@@ -722,6 +722,7 @@ export default function InventoryPanel() {
       {priceModalItem && (
         <PriceModal
           name={priceModalItem.name ?? ""}
+          image={priceModalItem.icon_url}
           priceSources={priceModalItem.priceSources}
           onClose={() => setPriceModalItem(null)}
         />

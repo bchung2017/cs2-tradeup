@@ -19,6 +19,7 @@ export default function TradeUpConsole() {
   // breakdown (so the modal shows the same numbers the inventory side does).
   const [priceModal, setPriceModal] = useState<{
     name: string;
+    image?: string | null;
     priceSources?: Record<string, number> | null;
   } | null>(null);
 
@@ -266,6 +267,7 @@ export default function TradeUpConsole() {
                           wear: wearFromFloat(slot.float),
                           stattrak: slot.stattrak,
                         }),
+                        image: slot.skin!.image,
                         priceSources: slot.priceSources,
                       })
                     }
@@ -359,7 +361,7 @@ export default function TradeUpConsole() {
         <Outcomes
           result={result}
           stattrak={isStatTrak}
-          onPrice={(name, priceSources) => setPriceModal({ name, priceSources })}
+          onPrice={(name, image, priceSources) => setPriceModal({ name, image, priceSources })}
         />
       )}
 
@@ -373,6 +375,7 @@ export default function TradeUpConsole() {
       {priceModal && (
         <PriceModal
           name={priceModal.name}
+          image={priceModal.image}
           priceSources={priceModal.priceSources}
           onClose={() => setPriceModal(null)}
         />
@@ -469,7 +472,7 @@ function Outcomes({
 }: {
   result: TradeupResult;
   stattrak: boolean;
-  onPrice: (name: string, priceSources?: Record<string, number> | null) => void;
+  onPrice: (name: string, image: string | null | undefined, priceSources?: Record<string, number> | null) => void;
 }) {
   // The currently spotlighted outcome. Clicking a donut slice or legend title
   // selects it: the matching card below scrolls into view and lights up. One
@@ -616,7 +619,7 @@ function OutcomeCard({
   inputCost: number;
   color: string;
   stattrak: boolean;
-  onPrice: (name: string, priceSources?: Record<string, number> | null) => void;
+  onPrice: (name: string, image: string | null | undefined, priceSources?: Record<string, number> | null) => void;
   selected: boolean;
   cardRef: (el: HTMLDivElement | null) => void;
 }) {
@@ -627,13 +630,13 @@ function OutcomeCard({
       : null;
   const rarity = rarityHex(o.skin.rarity.name);
   const spectrum = roiColor(roi);
-  const insetBar = roi == null ? "" : `inset 4px 0 0 0 ${spectrum}`;
 
   // Clicking anywhere on the card opens the per-marketplace price modal — same
   // target as the inner PRICE row, so the whole card is a hit area.
   const openPrice = () =>
     onPrice(
       marketName({ weapon: o.skin.weapon.name, skin: o.skin.name, wear: o.outputWear, stattrak }),
+      o.skin.image,
       o.priceSources,
     );
 
@@ -660,10 +663,7 @@ function OutcomeCard({
         flexDirection: "column",
         gap: 8,
         scrollMarginTop: 80,
-        transition: "box-shadow 0.2s, background 0.2s",
-        // ROI-driven inset accent (red→yellow→green). No pie-colored ring on
-        // selection — the background tint carries that now.
-        boxShadow: insetBar || undefined,
+        transition: "background 0.2s",
       }}
     >
       {idx === 0 && (
@@ -711,28 +711,33 @@ function OutcomeCard({
         <span style={{ color: "var(--amber)" }}>{o.outputFloat.toFixed(4)}</span>
       </div>
 
-      {/* hit chance (big) + odds */}
+      {/* hit chance (big) + odds — neutral, not green; profit is read off the
+          color-coded PRICE/NET/ROI block below instead. */}
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 22, color: "var(--green)" }}>
+        <span style={{ fontSize: 22, color: "var(--cream)" }}>
           {(o.probability * 100).toFixed(1)}%
         </span>
         <span className="hud" style={{ color: "var(--cream-dim)" }}>{oddsString(o.probability)}</span>
       </div>
 
-      {/* price / land / roi */}
+      {/* price / net / roi — the prominent profit readout. All three values are
+          color-coded by ROI (red loss → yellow break-even → green profit), now
+          that the inset accent bar is gone. */}
       <div
         style={{
           borderTop: "1px solid var(--line)",
           paddingTop: 9,
           display: "flex",
           flexDirection: "column",
-          gap: 4,
-          fontSize: 12,
+          gap: 5,
+          fontSize: 13,
         }}
       >
         <CardRow
           label="PRICE"
           value={usd(o.estimatedPrice)}
+          color={o.estimatedPrice == null ? "var(--cream-dim)" : spectrum}
+          strong
           onClick={(e) => {
             e?.stopPropagation(); // outer card also opens the modal — don't double-fire
             openPrice();
@@ -742,11 +747,13 @@ function OutcomeCard({
           label="NET"
           value={land == null ? "—" : signedUsd(land)}
           color={land == null ? "var(--cream-dim)" : spectrum}
+          strong
         />
         <CardRow
           label="ROI"
           value={roi == null ? "—" : `${roi >= 0 ? "+" : ""}${roi.toFixed(0)}%`}
-          color={spectrum}
+          color={roi == null ? "var(--cream-dim)" : spectrum}
+          strong
         />
       </div>
     </div>
@@ -758,12 +765,16 @@ function CardRow({
   value,
   color,
   onClick,
+  strong,
 }: {
   label: string;
   value: string;
   color?: string;
   onClick?: (e?: React.MouseEvent) => void;
+  strong?: boolean;
 }) {
+  // `strong` makes the value the prominent readout: larger and bold.
+  const valueEmphasis = strong ? { fontSize: 15, fontWeight: 700 } : undefined;
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
       <span className="hud" style={{ color: "var(--cream-dim)" }}>{label}</span>
@@ -781,12 +792,13 @@ function CardRow({
             color: color ?? "var(--cream)",
             borderBottom: "1px dotted currentColor",
             lineHeight: 1.1,
+            ...valueEmphasis,
           }}
         >
           {value}
         </button>
       ) : (
-        <span style={{ color: color ?? "var(--cream)" }}>{value}</span>
+        <span style={{ color: color ?? "var(--cream)", ...valueEmphasis }}>{value}</span>
       )}
     </div>
   );
@@ -906,7 +918,7 @@ function ResultViz({
   selectedIdx: number | null;
   onSelect: (idx: number) => void;
 }) {
-  const { outcomes } = result;
+  const { outcomes, inputCost } = result;
   const totalProb = outcomes.reduce((a, o) => a + o.probability, 0) || 1;
 
   // Donut slices, largest first (outcomes are already sorted desc by prob).
@@ -1035,8 +1047,33 @@ function ResultViz({
               }}
               style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 2 }}
             >
+              {/* column header — labels the per-item NET/ROI columns; left pad
+                  matches the rows' 3px border + 7px padding so columns line up */}
+              <div
+                className="hud"
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  padding: "0 7px 4px 10px",
+                  color: "var(--cream-dim)",
+                  fontSize: 8,
+                }}
+              >
+                <span style={{ width: 9, flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0 }}>ITEM</span>
+                <span style={{ flexShrink: 0, minWidth: 44, textAlign: "right" }}>CHANCE</span>
+                <span style={{ flexShrink: 0, minWidth: 56, textAlign: "right" }}>NET</span>
+                <span style={{ flexShrink: 0, minWidth: 50, textAlign: "right" }}>ROI</span>
+              </div>
               {slices.map((s) => {
                 const lit = focusIdx === s.idx;
+                // Per-item economics, same math + spectrum the cards use.
+                const land = s.o.estimatedPrice != null ? s.o.estimatedPrice - inputCost : null;
+                const roi =
+                  s.o.estimatedPrice != null && inputCost > 0
+                    ? ((s.o.estimatedPrice - inputCost) / inputCost) * 100
+                    : null;
+                const spectrum = roiColor(roi);
                 return (
                   <button
                     type="button"
@@ -1082,7 +1119,33 @@ function ResultViz({
                       {s.o.skin.name}{" "}
                       <span className="hud" style={{ fontSize: 8 }}>{s.o.outputWear}</span>
                     </span>
-                    <span className="hud" style={{ flexShrink: 0 }}>{pcs(s.o.probability)}</span>
+                    <span className="hud" style={{ flexShrink: 0, minWidth: 44, textAlign: "right" }}>
+                      {pcs(s.o.probability)}
+                    </span>
+                    <span
+                      className="hud"
+                      style={{
+                        flexShrink: 0,
+                        minWidth: 56,
+                        textAlign: "right",
+                        whiteSpace: "nowrap",
+                        color: land == null ? "var(--cream-dim)" : spectrum,
+                      }}
+                    >
+                      {land == null ? "—" : signedUsd(land)}
+                    </span>
+                    <span
+                      className="hud"
+                      style={{
+                        flexShrink: 0,
+                        minWidth: 50,
+                        textAlign: "right",
+                        whiteSpace: "nowrap",
+                        color: roi == null ? "var(--cream-dim)" : spectrum,
+                      }}
+                    >
+                      {roi == null ? "—" : `${roi >= 0 ? "+" : ""}${roi.toFixed(0)}%`}
+                    </span>
                   </button>
                 );
               })}
