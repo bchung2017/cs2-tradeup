@@ -2,7 +2,7 @@
  * Pricing service — orchestration behind the admin Pricing controls.
  *
  * Default sync = MARKET AVERAGE. It pulls every CSGOTrader bulk feed (steam,
- * skinport, buff163) in parallel and, per item, averages the available
+ * skinport) in parallel and, per item, averages the available
  * per-source prices into one "market average". Both the average AND the
  * per-source breakdown are persisted in prices.json, so the trade-up EV math
  * reads a blended number while the UI can still show the spread.
@@ -192,7 +192,12 @@ export async function syncMarketAverage(opts: MarketAvgOptions): Promise<AdminRe
   // full run; a tag/wear-scoped run sees only a slice, so don't overwrite it.
   const fullRun = !opts.tag && !opts.wear;
   const priceable = fullRun ? work.length - unmatched : undefined;
-  if (!opts.dryRun && updated > 0) persist(prices, "market-avg", updated, priceable);
+  // Persist on any real write, OR on a full run that recomputed the priceable
+  // ceiling. Once the catalog is fully priced, `updated` is 0 every run, so
+  // gating solely on updated>0 would never record priceableKeys to the meta.
+  if (!opts.dryRun && (updated > 0 || (fullRun && priceable != null))) {
+    persist(prices, "market-avg", updated, priceable);
+  }
 
   const realKeys = countReal(prices);
   const totalKeys = Object.keys(prices).length;

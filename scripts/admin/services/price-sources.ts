@@ -6,9 +6,9 @@
  *   • BULK (default): CSGOTrader's free per-market dumps at
  *     prices.csgotrader.app/latest/<provider>.json — one request returns the
  *     whole catalog keyed by market_hash_name. `steam` gives REAL Steam market
- *     medians (the bulk Steam feed Steam itself doesn't expose); `skinport` /
- *     `buff163` give those aftermarkets. Open-source project, courtesy
- *     attribution appreciated.
+ *     medians (the bulk Steam feed Steam itself doesn't expose); `skinport`
+ *     gives that aftermarket. Open-source project, courtesy attribution
+ *     appreciated.
  *   • PER-ITEM (fallback): Steam's official priceoverview endpoint — canonical
  *     but rate-limited; used to spot-refresh single items.
  */
@@ -24,8 +24,8 @@ export interface PriceQuote {
 
 const CSGOTRADER_BASE = "https://prices.csgotrader.app/latest";
 
-export type BulkProvider = "steam" | "skinport" | "buff163";
-export const BULK_PROVIDERS: BulkProvider[] = ["steam", "skinport", "buff163"];
+export type BulkProvider = "steam" | "skinport";
+export const BULK_PROVIDERS: BulkProvider[] = ["steam", "skinport"];
 
 const num = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
 
@@ -34,7 +34,6 @@ const num = (x: unknown): number | null => (typeof x === "number" && Number.isFi
  * Verified live shapes:
  *   steam:    { last_24h, last_7d, last_30d, last_90d }
  *   skinport: { starting_at, suggested_price }
- *   buff163:  { starting_at: { price }, highest_order: { price } }
  */
 const EXTRACTORS: Record<BulkProvider, (raw: unknown) => PriceQuote | null> = {
   steam: (raw) => {
@@ -49,13 +48,6 @@ const EXTRACTORS: Record<BulkProvider, (raw: unknown) => PriceQuote | null> = {
     const suggested = num(r.suggested_price);
     const m = suggested ?? start;
     return m == null ? null : { median: m, lowest: start ?? m, volume: 0 };
-  },
-  buff163: (raw) => {
-    const r = raw as { starting_at?: { price?: number }; highest_order?: { price?: number } };
-    const start = num(r.starting_at?.price);
-    const order = num(r.highest_order?.price);
-    const m = start ?? order;
-    return m == null ? null : { median: m, lowest: order ?? m, volume: 0 };
   },
 };
 

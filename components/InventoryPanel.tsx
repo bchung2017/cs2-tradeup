@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTradeup, isStatTrakName, inventoryInputEligibility } from "@/lib/tradeup-context";
 import { rarityHex, usd } from "@/lib/display";
+import PriceModal from "@/components/PriceModal";
 import type { InventoryItem } from "@/lib/steam";
 
 type StatusClass = "ok" | "warn" | "err" | "dim";
@@ -719,206 +720,13 @@ export default function InventoryPanel() {
       </main>
 
       {priceModalItem && (
-        <PriceModal item={priceModalItem} onClose={() => setPriceModalItem(null)} />
+        <PriceModal
+          name={priceModalItem.name ?? ""}
+          priceSources={priceModalItem.priceSources}
+          onClose={() => setPriceModalItem(null)}
+        />
       )}
     </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Price breakdown modal — opens from an inventory card's price. Lists Steam +
-// third-party marketplaces, each with the price we have on file (Steam /
-// Skinport / Buff163 come from the synced sources; the rest are link-only) and
-// a click-through to that marketplace's listing for this exact item (the full
-// market_hash_name already encodes the skin, wear, and StatTrak/Souvenir tag).
-// ---------------------------------------------------------------------------
-
-interface Marketplace {
-  key: string;
-  label: string;
-  color: string;
-  // Builds the listing URL for a raw inventory market_hash_name.
-  url: (marketHashName: string) => string;
-}
-
-const MARKETPLACES: Marketplace[] = [
-  {
-    key: "steam",
-    label: "Steam",
-    color: "#66c0f4",
-    url: (n) => `https://steamcommunity.com/market/listings/730/${encodeURIComponent(n)}`,
-  },
-  {
-    key: "buff163",
-    label: "Buff163",
-    color: "#f0a500",
-    url: (n) =>
-      `https://buff.163.com/market/csgo#tab=selling&page_num=1&search=${encodeURIComponent(n)}`,
-  },
-  {
-    key: "skinport",
-    label: "Skinport",
-    color: "#fa490a",
-    url: (n) => `https://skinport.com/market?search=${encodeURIComponent(stripTags(n))}`,
-  },
-  {
-    key: "csfloat",
-    label: "CSFloat",
-    color: "#a78bfa",
-    url: (n) => `https://csfloat.com/search?market_hash_name=${encodeURIComponent(n)}`,
-  },
-  {
-    key: "dmarket",
-    label: "DMarket",
-    color: "#27c281",
-    url: (n) => `https://dmarket.com/ingame-items/item-list/csgo-skins?title=${encodeURIComponent(stripTags(n))}`,
-  },
-];
-
-// Strip ★ / StatTrak™ / Souvenir / "(Wear)" for marketplaces whose search reads
-// a plain skin name rather than the full Steam market_hash_name.
-function stripTags(name: string): string {
-  return name
-    .replace(/^★\s*/, "")
-    .replace(/^StatTrak™?\s*/i, "")
-    .replace(/^Souvenir\s*/i, "")
-    .replace(/\s*\([^)]*\)\s*$/, "")
-    .trim();
-}
-
-function PriceModal({ item, onClose }: { item: InventoryItem; onClose: () => void }) {
-  // Esc closes; restore nothing else (the grid stays mounted behind the scrim).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  const name = item.name ?? "";
-  const sources = item.priceSources ?? {};
-
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 50,
-        background: "rgba(0,0,0,0.72)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "min(440px, 100%)",
-          background: "var(--surface)",
-          border: "1px solid var(--surface-line)",
-          boxShadow: "0 0 0 1px rgba(0,0,0,0.6), 0 16px 60px rgba(0,0,0,0.8)",
-          padding: "18px 20px 20px",
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-          <div>
-            <span className="hud hud-ember">MARKET PRICES</span>
-            <div style={{ fontSize: 14, marginTop: 6, color: "var(--cream)", lineHeight: 1.35 }}>
-              {name || "(unnamed)"}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              background: "transparent",
-              border: "1px solid var(--surface-line)",
-              color: "var(--cream-dim)",
-              cursor: "pointer",
-              padding: "2px 9px",
-              fontFamily: "var(--mono)",
-              fontSize: 14,
-              lineHeight: 1.2,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-
-        <div
-          style={{
-            marginTop: 16,
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(118px, 1fr))",
-            gap: 10,
-          }}
-        >
-          {MARKETPLACES.map((m) => {
-            const price = sources[m.key];
-            return (
-              <a
-                key={m.key}
-                href={m.url(name)}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={`Open ${m.label} listing in a new tab`}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 6,
-                  textDecoration: "none",
-                  padding: "12px 8px",
-                  background: "var(--void)",
-                  border: "1px solid var(--surface-line)",
-                  borderTop: `3px solid ${m.color}`,
-                  color: "var(--cream)",
-                }}
-              >
-                {/* Lettermark "icon" — brand-tinted disc, no external assets. */}
-                <span
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: "50%",
-                    background: m.color,
-                    color: "var(--void)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontFamily: "var(--mono)",
-                    fontWeight: 700,
-                    fontSize: 15,
-                  }}
-                >
-                  {m.label[0]}
-                </span>
-                <span className="hud" style={{ color: "var(--cream-dim)" }}>{m.label}</span>
-                <span
-                  style={{
-                    fontFamily: "var(--mono)",
-                    fontVariantNumeric: "tabular-nums",
-                    fontSize: 13,
-                    color: price != null ? "var(--green)" : "var(--cream-dim)",
-                  }}
-                >
-                  {price != null ? usd(price) : "view →"}
-                </span>
-              </a>
-            );
-          })}
-        </div>
-
-        <div style={{ marginTop: 14, fontSize: 11, color: "var(--cream-dim)", opacity: 0.7, lineHeight: 1.4 }}>
-          Prices shown are the last synced values; icons open the live listing for this
-          exact wear in a new tab.
-        </div>
-      </div>
-    </div>
   );
 }
 

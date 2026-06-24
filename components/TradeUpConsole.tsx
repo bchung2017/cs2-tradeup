@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import CircuitBoard from "@/components/CircuitBoard";
 import SkinPicker from "@/components/SkinPicker";
+import PriceModal, { marketName, wearFromFloat } from "@/components/PriceModal";
 import { oddsString, rarityColor, rarityHex, signedUsd, usd } from "@/lib/display";
 import { makeSlots, useTradeup } from "@/lib/tradeup-context";
 import type { Rarity, Skin, TradeupOutcome, TradeupResult } from "@/types/cs2";
@@ -13,6 +14,8 @@ export default function TradeUpConsole() {
   const [result, setResult] = useState<TradeupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  // market_hash_name of the price whose marketplace breakdown is open, or null.
+  const [priceModal, setPriceModal] = useState<string | null>(null);
 
   // StatTrak is no longer a manual toggle — the contract inherits it from the
   // first staged item (inventory enforces all inputs share that state).
@@ -235,7 +238,8 @@ export default function TradeUpConsole() {
                   </span>
                 </div>
                 {/* Per-input market price, carried from the inventory feed
-                    (null for catalog picks / unpriced wears). */}
+                    (null for catalog picks / unpriced wears). Click the value
+                    for the per-marketplace breakdown of this exact wear. */}
                 <div
                   style={{
                     display: "flex",
@@ -243,20 +247,37 @@ export default function TradeUpConsole() {
                     alignItems: "baseline",
                     marginTop: 1,
                   }}
-                  title="Median market price of this input"
                 >
                   <span className="hud" style={{ color: "var(--cream-dim)", fontSize: 8 }}>
                     PRICE
                   </span>
-                  <span
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPriceModal(
+                        marketName({
+                          weapon: slot.skin!.weapon.name,
+                          skin: slot.skin!.name,
+                          wear: wearFromFloat(slot.float),
+                          stattrak: slot.stattrak,
+                        }),
+                      )
+                    }
+                    title="Compare prices across marketplaces"
                     style={{
+                      background: "transparent",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
                       fontFamily: "var(--mono)",
                       fontSize: 11,
                       color: slot.price != null ? "var(--green)" : "var(--cream-dim)",
+                      borderBottom: "1px dotted currentColor",
+                      lineHeight: 1.1,
                     }}
                   >
                     {slot.price != null ? usd(slot.price) : "—"}
-                  </span>
+                  </button>
                 </div>
               </>
             ) : (
@@ -328,7 +349,7 @@ export default function TradeUpConsole() {
         </div>
       )}
 
-      {result && <Outcomes result={result} />}
+      {result && <Outcomes result={result} stattrak={isStatTrak} onPrice={setPriceModal} />}
 
       <SkinPicker
         open={pickerFor !== null}
@@ -336,12 +357,22 @@ export default function TradeUpConsole() {
         onClose={() => setPickerFor(null)}
         onPick={(skin) => pickerFor !== null && pick(pickerFor, skin)}
       />
+
+      {priceModal && <PriceModal name={priceModal} onClose={() => setPriceModal(null)} />}
     </main>
     </>
   );
 }
 
-function Outcomes({ result }: { result: TradeupResult }) {
+function Outcomes({
+  result,
+  stattrak,
+  onPrice,
+}: {
+  result: TradeupResult;
+  stattrak: boolean;
+  onPrice: (name: string) => void;
+}) {
   const profitable = result.profitEV >= 0;
   return (
     <section
@@ -411,6 +442,8 @@ function Outcomes({ result }: { result: TradeupResult }) {
             idx={idx}
             inputCost={result.inputCost}
             color={PIE_COLORS[idx % PIE_COLORS.length]}
+            stattrak={stattrak}
+            onPrice={onPrice}
           />
         ))}
       </div>
@@ -435,11 +468,15 @@ function OutcomeCard({
   idx,
   inputCost,
   color,
+  stattrak,
+  onPrice,
 }: {
   o: TradeupOutcome;
   idx: number;
   inputCost: number;
   color: string;
+  stattrak: boolean;
+  onPrice: (name: string) => void;
 }) {
   const land = o.estimatedPrice != null ? o.estimatedPrice - inputCost : null;
   const roi =
@@ -542,7 +579,20 @@ function OutcomeCard({
           fontSize: 10,
         }}
       >
-        <CardRow label="PRICE" value={usd(o.estimatedPrice)} />
+        <CardRow
+          label="PRICE"
+          value={usd(o.estimatedPrice)}
+          onClick={() =>
+            onPrice(
+              marketName({
+                weapon: o.skin.weapon.name,
+                skin: o.skin.name,
+                wear: o.outputWear,
+                stattrak,
+              }),
+            )
+          }
+        />
         <CardRow
           label="NET"
           value={land == null ? "—" : signedUsd(land)}
@@ -558,11 +608,41 @@ function OutcomeCard({
   );
 }
 
-function CardRow({ label, value, color }: { label: string; value: string; color?: string }) {
+function CardRow({
+  label,
+  value,
+  color,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  color?: string;
+  onClick?: () => void;
+}) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
       <span className="hud" style={{ color: "var(--cream-dim)" }}>{label}</span>
-      <span style={{ color: color ?? "var(--cream)" }}>{value}</span>
+      {onClick ? (
+        <button
+          type="button"
+          onClick={onClick}
+          title="Compare prices across marketplaces"
+          style={{
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            font: "inherit",
+            color: color ?? "var(--cream)",
+            borderBottom: "1px dotted currentColor",
+            lineHeight: 1.1,
+          }}
+        >
+          {value}
+        </button>
+      ) : (
+        <span style={{ color: color ?? "var(--cream)" }}>{value}</span>
+      )}
     </div>
   );
 }
@@ -654,20 +734,30 @@ function ResultViz({ result }: { result: TradeupResult }) {
               OUTCOMES
             </text>
           </svg>
-          <div style={{ fontSize: 10, lineHeight: 1.5, minWidth: 0 }}>
-            {slices.slice(0, 8).map((s) => (
+          {/* Full legend, scrollable so every outcome is reachable — the donut
+              can have far more slices than fit beside it. Height tracks the
+              130px donut; overflow scrolls the overflow instead of hiding it. */}
+          <div
+            style={{
+              fontSize: 10,
+              lineHeight: 1.5,
+              minWidth: 0,
+              flex: 1,
+              maxHeight: 130,
+              overflowY: "auto",
+              paddingRight: 4,
+            }}
+          >
+            {slices.map((s) => (
               <div
                 key={`${s.o.skin.id}-${s.o.outputWear}`}
                 style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
               >
                 <span style={{ width: 8, height: 8, background: s.color, flexShrink: 0 }} />
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{s.o.skin.name}</span>
-                <span className="hud" style={{ marginLeft: "auto" }}>{pcs(s.o.probability)}</span>
+                <span className="hud" style={{ marginLeft: "auto", flexShrink: 0 }}>{pcs(s.o.probability)}</span>
               </div>
             ))}
-            {slices.length > 8 && (
-              <div className="hud" style={{ marginTop: 2 }}>+{slices.length - 8} more</div>
-            )}
           </div>
         </div>
       </div>

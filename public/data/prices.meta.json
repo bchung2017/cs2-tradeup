@@ -1,7 +1,8 @@
 {
   "source": "market-avg",
-  "lastSync": 1781844310472,
-  "lastSyncUpdated": 2350,
+  "lastSync": 1782265524899,
+  "lastSyncUpdated": 0,
   "totalKeys": 20490,
-  "realKeys": 12264
+  "realKeys": 12264,
+  "priceableKeys": 12264
 }

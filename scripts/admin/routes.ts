@@ -20,7 +20,7 @@ export const ROUTES: AdminRoute[] = [
     path: "/api/pricing/sync",
     label: "Sync all prices",
     section: "Pricing",
-    hint: "Market average: pulls all CSGOTrader feeds (steam+skinport+buff163), averages each item, stores the blend + per-source breakdown. One shot, seconds. Query: ?providers=steam,skinport &force=1 &dryRun=1 &source=steam-direct (per-item fallback).",
+    hint: "Market average: pulls all CSGOTrader feeds (steam+skinport), averages each item, stores the blend + per-source breakdown. One shot, seconds. Query: ?providers=steam,skinport &force=1 &dryRun=1 &source=steam-direct (per-item fallback).",
     handler: syncPricesRoute,
   },
   {
