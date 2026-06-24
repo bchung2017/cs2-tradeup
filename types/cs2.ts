@@ -90,6 +90,9 @@ export interface TradeupOutcome {
   outputFloat: number;
   outputWear: Wear;
   estimatedPrice: number | null;
+  // Per-marketplace breakdown behind estimatedPrice (the price entry's `sources`),
+  // so the price modal can show the same per-source numbers the inventory side does.
+  priceSources?: Record<string, number> | null;
 }
 
 export interface TradeupResult {

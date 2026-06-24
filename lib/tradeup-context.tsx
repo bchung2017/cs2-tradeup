@@ -12,6 +12,10 @@ export interface Slot {
   // the trade-up side can show per-input price. Null/undefined when unknown
   // (e.g. catalog picks, or items with no priced wear).
   price?: number | null;
+  // Per-marketplace breakdown behind `price`, carried alongside it so the price
+  // modal opened from a staged input shows the same numbers the inventory side
+  // does. Null/undefined for catalog picks (no synced sources).
+  priceSources?: Record<string, number> | null;
 }
 
 export const makeSlots = (n: number): Slot[] =>
@@ -179,7 +183,13 @@ export function TradeupProvider({ children }: { children: React.ReactNode }) {
     const next = [...prev];
     // Use the real per-item float once a deep sync has populated it; otherwise
     // fall back to the skin's min (synthetic until floats are resolved).
-    next[idx] = { skin, float: item.float ?? skin.min_float, stattrak, price: item.price ?? null };
+    next[idx] = {
+      skin,
+      float: item.float ?? skin.min_float,
+      stattrak,
+      price: item.price ?? null,
+      priceSources: item.priceSources ?? null,
+    };
     setSlots(next); // auto-sizes to ×5 when this knife is the leading item
     return { ok: true };
   }, [setSlots]);

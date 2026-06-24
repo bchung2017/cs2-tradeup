@@ -15,7 +15,12 @@ export default function TradeUpConsole() {
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   // market_hash_name of the price whose marketplace breakdown is open, or null.
-  const [priceModal, setPriceModal] = useState<string | null>(null);
+  // Open price modal: the item's market_hash_name plus its per-marketplace
+  // breakdown (so the modal shows the same numbers the inventory side does).
+  const [priceModal, setPriceModal] = useState<{
+    name: string;
+    priceSources?: Record<string, number> | null;
+  } | null>(null);
 
   // StatTrak is no longer a manual toggle — the contract inherits it from the
   // first staged item (inventory enforces all inputs share that state).
@@ -254,14 +259,15 @@ export default function TradeUpConsole() {
                   <button
                     type="button"
                     onClick={() =>
-                      setPriceModal(
-                        marketName({
+                      setPriceModal({
+                        name: marketName({
                           weapon: slot.skin!.weapon.name,
                           skin: slot.skin!.name,
                           wear: wearFromFloat(slot.float),
                           stattrak: slot.stattrak,
                         }),
-                      )
+                        priceSources: slot.priceSources,
+                      })
                     }
                     title="Compare prices across marketplaces"
                     style={{
@@ -349,7 +355,13 @@ export default function TradeUpConsole() {
         </div>
       )}
 
-      {result && <Outcomes result={result} stattrak={isStatTrak} onPrice={setPriceModal} />}
+      {result && (
+        <Outcomes
+          result={result}
+          stattrak={isStatTrak}
+          onPrice={(name, priceSources) => setPriceModal({ name, priceSources })}
+        />
+      )}
 
       <SkinPicker
         open={pickerFor !== null}
@@ -358,7 +370,13 @@ export default function TradeUpConsole() {
         onPick={(skin) => pickerFor !== null && pick(pickerFor, skin)}
       />
 
-      {priceModal && <PriceModal name={priceModal} onClose={() => setPriceModal(null)} />}
+      {priceModal && (
+        <PriceModal
+          name={priceModal.name}
+          priceSources={priceModal.priceSources}
+          onClose={() => setPriceModal(null)}
+        />
+      )}
     </main>
     </>
   );
@@ -371,7 +389,7 @@ function Outcomes({
 }: {
   result: TradeupResult;
   stattrak: boolean;
-  onPrice: (name: string) => void;
+  onPrice: (name: string, priceSources?: Record<string, number> | null) => void;
 }) {
   const profitable = result.profitEV >= 0;
   return (
@@ -476,7 +494,7 @@ function OutcomeCard({
   inputCost: number;
   color: string;
   stattrak: boolean;
-  onPrice: (name: string) => void;
+  onPrice: (name: string, priceSources?: Record<string, number> | null) => void;
 }) {
   const land = o.estimatedPrice != null ? o.estimatedPrice - inputCost : null;
   const roi =
@@ -590,6 +608,7 @@ function OutcomeCard({
                 wear: o.outputWear,
                 stattrak,
               }),
+              o.priceSources,
             )
           }
         />

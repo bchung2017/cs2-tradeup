@@ -117,13 +117,14 @@ export function computeTradeup(args: ComputeArgs): TradeupResult {
       const outFloat = denormalizeFloat(avgNormalized, out.min_float, out.max_float);
       const wear = floatToWear(outFloat);
       const priceKey = `${out.id}|${wear}|${isStatTrak ? "st" : "norm"}`;
-      const price = prices[priceKey]?.median ?? null;
+      const priceEntry = prices[priceKey];
       outcomes.push({
         skin: out,
         probability: probPerSkin,
         outputFloat: outFloat,
         outputWear: wear,
-        estimatedPrice: price,
+        estimatedPrice: priceEntry?.median ?? null,
+        priceSources: priceEntry?.sources ?? null,
       });
     }
   }
