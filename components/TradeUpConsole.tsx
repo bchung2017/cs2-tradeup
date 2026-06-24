@@ -391,8 +391,6 @@ function Outcomes({
   stattrak: boolean;
   onPrice: (name: string, priceSources?: Record<string, number> | null) => void;
 }) {
-  const profitable = result.profitEV >= 0;
-
   // The currently spotlighted outcome. Clicking a donut slice or legend title
   // selects it: the matching card below scrolls into view and lights up. One
   // ref per card lets us scroll directly to it.
@@ -415,20 +413,7 @@ function Outcomes({
         backdropFilter: "blur(1px)",
       }}
     >
-      <div style={{ display: "flex", gap: 28, alignItems: "baseline", flexWrap: "wrap" }}>
-        <Stat label="INPUT COST" value={usd(result.inputCost)} />
-        <Stat label="AVERAGE PAYOUT" value={usd(result.expectedValue)} />
-        <Stat
-          label="AVERAGE PROFIT"
-          value={signedUsd(result.profitEV)}
-          color={profitable ? "var(--profit)" : "var(--loss)"}
-        />
-        <Stat
-          label="OUTPUT RARITY"
-          value={result.outputRarity}
-          color={rarityColor(result.outputRarity)}
-        />
-      </div>
+      <SummaryStats result={result} />
 
       {result.warnings.length > 0 && (
         <div style={{ marginTop: 16 }}>
@@ -524,12 +509,22 @@ function OutcomeCard({
   const spectrum = roiColor(roi);
   const insetBar = roi == null ? "" : `inset 4px 0 0 0 ${spectrum}`;
 
+  // Clicking anywhere on the card opens the per-marketplace price modal — same
+  // target as the inner PRICE row, so the whole card is a hit area.
+  const openPrice = () =>
+    onPrice(
+      marketName({ weapon: o.skin.weapon.name, skin: o.skin.name, wear: o.outputWear, stattrak }),
+      o.priceSources,
+    );
+
   return (
     <div
       ref={cardRef}
       className="bracket"
+      onClick={openPrice}
       style={{
         position: "relative",
+        cursor: "pointer",
         border: selected ? `1px solid ${color}` : "1px solid var(--line)",
         borderTop: `2px solid ${rarity}`,
         background: selected ? "var(--surface)" : "var(--surface-2)",
@@ -626,17 +621,10 @@ function OutcomeCard({
         <CardRow
           label="PRICE"
           value={usd(o.estimatedPrice)}
-          onClick={() =>
-            onPrice(
-              marketName({
-                weapon: o.skin.weapon.name,
-                skin: o.skin.name,
-                wear: o.outputWear,
-                stattrak,
-              }),
-              o.priceSources,
-            )
-          }
+          onClick={(e) => {
+            e?.stopPropagation(); // outer card also opens the modal — don't double-fire
+            openPrice();
+          }}
         />
         <CardRow
           label="NET"
@@ -662,7 +650,7 @@ function CardRow({
   label: string;
   value: string;
   color?: string;
-  onClick?: () => void;
+  onClick?: (e?: React.MouseEvent) => void;
 }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -688,6 +676,81 @@ function CardRow({
       ) : (
         <span style={{ color: color ?? "var(--cream)" }}>{value}</span>
       )}
+    </div>
+  );
+}
+
+// One horizontal summary row: the four headline stats sit beside the
+// chance-you-come-out-ahead bar and the cost-vs-payout comparison (these last
+// two used to live in the distribution grid). Wraps on narrow widths.
+function SummaryStats({ result }: { result: TradeupResult }) {
+  const { outcomes, inputCost, expectedValue } = result;
+  const profitable = result.profitEV >= 0;
+  const totalProb = outcomes.reduce((a, o) => a + o.probability, 0) || 1;
+
+  // Profit chance: probability mass that lands above / below / at-unknown cost.
+  let pProfit = 0, pLoss = 0, pUnknown = 0;
+  for (const o of outcomes) {
+    if (o.estimatedPrice == null) pUnknown += o.probability;
+    else if (o.estimatedPrice >= inputCost) pProfit += o.probability;
+    else pLoss += o.probability;
+  }
+  const pcs = (p: number) => `${((p / totalProb) * 100).toFixed(1)}%`;
+  const evMax = Math.max(inputCost, expectedValue, 0.01);
+
+  return (
+    <div style={{ display: "flex", gap: 28, alignItems: "flex-start", flexWrap: "wrap", rowGap: 20 }}>
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <Stat label="INPUT COST" value={usd(inputCost)} />
+        <Stat label="AVERAGE PAYOUT" value={usd(expectedValue)} />
+        <Stat
+          label="AVERAGE PROFIT"
+          value={signedUsd(result.profitEV)}
+          color={profitable ? "var(--profit)" : "var(--loss)"}
+        />
+        <Stat label="OUTPUT RARITY" value={result.outputRarity} color={rarityColor(result.outputRarity)} />
+      </div>
+
+      <div style={{ flex: "1 1 240px", minWidth: 220 }}>
+        <div className="hud" style={{ marginBottom: 8 }}>CHANCE YOU COME OUT AHEAD</div>
+        <div style={{ display: "flex", height: 22, border: "1px solid var(--line)" }}>
+          {[
+            { p: pProfit, color: "var(--profit)", label: "PROFIT" },
+            { p: pLoss, color: "var(--loss)", label: "LOSS" },
+            { p: pUnknown, color: "var(--surface-line)", label: "N/A" },
+          ]
+            .filter((b) => b.p > 0)
+            .map((b) => (
+              <div
+                key={b.label}
+                title={`${b.label} ${pcs(b.p)}`}
+                style={{
+                  width: `${(b.p / totalProb) * 100}%`,
+                  background: b.color,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 9,
+                  color: "var(--void)",
+                  overflow: "hidden",
+                }}
+              >
+                {(b.p / totalProb) >= 0.12 ? pcs(b.p) : ""}
+              </div>
+            ))}
+        </div>
+        <div className="hud" style={{ marginTop: 6, display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <span style={{ color: "var(--profit)" }}>▰ PROFIT {pcs(pProfit)}</span>
+          <span style={{ color: "var(--loss)" }}>▰ LOSS {pcs(pLoss)}</span>
+          {pUnknown > 0 && <span style={{ color: "var(--cream-dim)" }}>▰ NO PRICE {pcs(pUnknown)}</span>}
+        </div>
+      </div>
+
+      <div style={{ flex: "1 1 220px", minWidth: 200 }}>
+        <div className="hud" style={{ marginBottom: 8 }}>INPUT COST vs AVERAGE PAYOUT</div>
+        <ValueBar label="COST" value={inputCost} max={evMax} color="var(--loss)" />
+        <ValueBar label="PAYOUT" value={expectedValue} max={evMax} color="var(--profit)" />
+      </div>
     </div>
   );
 }
@@ -731,7 +794,7 @@ function ResultViz({
   selectedIdx: number | null;
   onSelect: (idx: number) => void;
 }) {
-  const { outcomes, inputCost, expectedValue } = result;
+  const { outcomes } = result;
   const totalProb = outcomes.reduce((a, o) => a + o.probability, 0) || 1;
 
   // Donut slices, largest first (outcomes are already sorted desc by prob).
@@ -742,43 +805,60 @@ function ResultViz({
     acc += frac;
     return { o, idx, start, end: acc * 360, color: PIE_COLORS[idx % PIE_COLORS.length] };
   });
-
-  // Profit chance: probability mass that lands above / below / at-unknown cost.
-  let pProfit = 0, pLoss = 0, pUnknown = 0;
-  for (const o of outcomes) {
-    if (o.estimatedPrice == null) pUnknown += o.probability;
-    else if (o.estimatedPrice >= inputCost) pProfit += o.probability;
-    else pLoss += o.probability;
-  }
   const pcs = (p: number) => `${((p / totalProb) * 100).toFixed(1)}%`;
-  const evMax = Math.max(inputCost, expectedValue, 0.01);
 
-  // Breakdown legend is collapsed by default — the donut carries the at-a-glance
-  // read; the per-item list expands on demand. Hovering a legend row lights up
-  // that item's donut slice (hover takes precedence over the click-selection).
+  // Breakdown dropdown is collapsed by default — the donut carries the
+  // at-a-glance read. Hovering a row lights its slice (hover beats the
+  // click-selection).
   const [legendOpen, setLegendOpen] = useState(false);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const focusIdx = hoveredIdx ?? selectedIdx; // which slice is "lit" right now
 
+  // Donut "detach + lerp": translate the donut so its center aligns with the
+  // focused row's center, clamped within the open list. The CSS transition on
+  // the transform eases the motion. The rows and the list measure their offset
+  // against the positioned flex row below, so donutShift is in the same frame.
+  const DONUT = 200;
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [donutShift, setDonutShift] = useState(0);
+  useEffect(() => {
+    if (!legendOpen || focusIdx == null) {
+      setDonutShift(0);
+      return;
+    }
+    const row = rowRefs.current[focusIdx];
+    const list = listRef.current;
+    if (!row || !list) return;
+    const rowCenter = row.offsetTop + row.offsetHeight / 2;
+    const listBottom = list.offsetTop + list.offsetHeight;
+    const max = Math.max(0, listBottom - DONUT);
+    setDonutShift(Math.max(0, Math.min(max, rowCenter - DONUT / 2)));
+  }, [focusIdx, legendOpen, outcomes.length]);
+
   return (
     <div
       style={{
-        marginTop: 22,
-        display: "grid",
-        gridTemplateColumns: "minmax(260px, 340px) 1fr",
-        gap: 28,
-        alignItems: "start",
+        marginTop: 24,
         paddingTop: 18,
         borderTop: "1px solid var(--line)",
       }}
     >
-      {/* outcome probability donut + full legend beneath it */}
-      <div>
-        <div className="hud" style={{ marginBottom: 10 }}>OUTCOME DISTRIBUTION</div>
-        {/* The donut now spans the whole column (it used to share the row with a
-            cramped legend). Slices are clickable and dim when another is picked. */}
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <svg viewBox="0 0 160 160" style={{ width: 200, height: 200, flexShrink: 0 }}>
+      <div className="hud" style={{ marginBottom: 12 }}>OUTCOME DISTRIBUTION</div>
+      {/* Donut adjacent to the breakdown dropdown. The flex row is positioned so
+          the rows + list measure their offsets against it for the lerp. */}
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start", position: "relative" }}>
+        {/* donut — detaches and lerps down toward the focused row as you scan */}
+        <div
+          style={{
+            flexShrink: 0,
+            width: DONUT,
+            transform: `translateY(${donutShift}px)`,
+            transition: "transform 0.45s cubic-bezier(0.22, 1, 0.36, 1)",
+            willChange: "transform",
+          }}
+        >
+          <svg viewBox="0 0 160 160" style={{ width: DONUT, height: DONUT, display: "block" }}>
             {slices.map((s) => {
               const lit = focusIdx === s.idx;
               return (
@@ -805,126 +885,82 @@ function ResultViz({
             </text>
           </svg>
         </div>
-        {/* Collapsible breakdown — collapsed by default so the donut leads.
-            Toggling reveals the full per-item list (no scroll, no truncation);
-            each row jumps to + highlights its outcome card below, and hovering a
-            row lights up that item's donut slice above. */}
-        <button
-          type="button"
-          onClick={() => setLegendOpen((v) => !v)}
-          aria-expanded={legendOpen}
-          className="hud"
-          style={{
-            marginTop: 14,
-            width: "100%",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 8,
-            background: "transparent",
-            border: "1px solid var(--line)",
-            padding: "6px 8px",
-            cursor: "pointer",
-            color: "var(--cream-dim)",
-          }}
-        >
-          <span>{legendOpen ? "▾" : "▸"} BREAKDOWN</span>
-          <span className="hud-ember">{slices.length} ITEMS</span>
-        </button>
-        {legendOpen && (
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 2 }}>
-          {slices.map((s) => {
-            const lit = focusIdx === s.idx;
-            return (
-              <button
-                type="button"
-                key={`${s.o.skin.id}-${s.o.outputWear}`}
-                onClick={() => onSelect(s.idx)}
-                onMouseEnter={() => setHoveredIdx(s.idx)}
-                onMouseLeave={() => setHoveredIdx(null)}
-                onFocus={() => setHoveredIdx(s.idx)}
-                onBlur={() => setHoveredIdx(null)}
-                title="Jump to this outcome"
-                style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: 8,
-                  width: "100%",
-                  textAlign: "left",
-                  background: lit ? "var(--surface-2)" : "transparent",
-                  border: "none",
-                  borderLeft: `3px solid ${lit ? s.color : "transparent"}`,
-                  padding: "4px 7px",
-                  cursor: "pointer",
-                  fontSize: 11,
-                  lineHeight: 1.35,
-                  color: lit ? "var(--cream)" : "var(--cream-dim)",
-                  transition: "background 0.15s, color 0.15s",
-                }}
-              >
-                <span
-                  style={{
-                    width: 9,
-                    height: 9,
-                    background: s.color,
-                    flexShrink: 0,
-                    alignSelf: "center",
-                  }}
-                />
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ color: "var(--cream-dim)" }}>{s.o.skin.weapon.name} | </span>
-                  {s.o.skin.name}{" "}
-                  <span className="hud" style={{ fontSize: 8 }}>{s.o.outputWear}</span>
-                </span>
-                <span className="hud" style={{ flexShrink: 0 }}>{pcs(s.o.probability)}</span>
-              </button>
-            );
-          })}
-        </div>
-        )}
-      </div>
 
-      {/* profit chance + value comparison */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-        <div>
-          <div className="hud" style={{ marginBottom: 8 }}>CHANCE YOU COME OUT AHEAD</div>
-          <div style={{ display: "flex", height: 22, border: "1px solid var(--line)" }}>
-            {[
-              { p: pProfit, color: "var(--profit)", label: "PROFIT" },
-              { p: pLoss, color: "var(--loss)", label: "LOSS" },
-              { p: pUnknown, color: "var(--surface-line)", label: "N/A" },
-            ]
-              .filter((b) => b.p > 0)
-              .map((b) => (
-                <div
-                  key={b.label}
-                  title={`${b.label} ${pcs(b.p)}`}
-                  style={{
-                    width: `${(b.p / totalProb) * 100}%`,
-                    background: b.color,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 9,
-                    color: "var(--void)",
-                    overflow: "hidden",
-                  }}
-                >
-                  {(b.p / totalProb) >= 0.12 ? pcs(b.p) : ""}
-                </div>
-              ))}
-          </div>
-          <div className="hud" style={{ marginTop: 6, display: "flex", gap: 16 }}>
-            <span style={{ color: "var(--profit)" }}>▰ PROFIT {pcs(pProfit)}</span>
-            <span style={{ color: "var(--loss)" }}>▰ LOSS {pcs(pLoss)}</span>
-            {pUnknown > 0 && <span style={{ color: "var(--cream-dim)" }}>▰ NO PRICE {pcs(pUnknown)}</span>}
-          </div>
-        </div>
-
-        <div>
-          <div className="hud" style={{ marginBottom: 8 }}>INPUT COST vs AVERAGE PAYOUT</div>
-          <ValueBar label="COST" value={inputCost} max={evMax} color="var(--loss)" />
-          <ValueBar label="PAYOUT" value={expectedValue} max={evMax} color="var(--profit)" />
+        {/* breakdown dropdown, adjacent to the donut */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <button
+            type="button"
+            onClick={() => setLegendOpen((v) => !v)}
+            aria-expanded={legendOpen}
+            className="hud"
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              background: "transparent",
+              border: "1px solid var(--line)",
+              padding: "6px 8px",
+              cursor: "pointer",
+              color: "var(--cream-dim)",
+            }}
+          >
+            <span>{legendOpen ? "▾" : "▸"} BREAKDOWN</span>
+            <span className="hud-ember">{slices.length} ITEMS</span>
+          </button>
+          {legendOpen && (
+            <div ref={listRef} style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+              {slices.map((s) => {
+                const lit = focusIdx === s.idx;
+                return (
+                  <button
+                    type="button"
+                    key={`${s.o.skin.id}-${s.o.outputWear}`}
+                    ref={(el) => { rowRefs.current[s.idx] = el; }}
+                    onClick={() => onSelect(s.idx)}
+                    onMouseEnter={() => setHoveredIdx(s.idx)}
+                    onMouseLeave={() => setHoveredIdx(null)}
+                    onFocus={() => setHoveredIdx(s.idx)}
+                    onBlur={() => setHoveredIdx(null)}
+                    title="Jump to this outcome"
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 8,
+                      width: "100%",
+                      textAlign: "left",
+                      background: lit ? "var(--surface-2)" : "transparent",
+                      border: "none",
+                      borderLeft: `3px solid ${lit ? s.color : "transparent"}`,
+                      padding: "4px 7px",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      lineHeight: 1.35,
+                      color: lit ? "var(--cream)" : "var(--cream-dim)",
+                      transition: "background 0.15s, color 0.15s",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 9,
+                        height: 9,
+                        background: s.color,
+                        flexShrink: 0,
+                        alignSelf: "center",
+                      }}
+                    />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ color: "var(--cream-dim)" }}>{s.o.skin.weapon.name} | </span>
+                      {s.o.skin.name}{" "}
+                      <span className="hud" style={{ fontSize: 8 }}>{s.o.outputWear}</span>
+                    </span>
+                    <span className="hud" style={{ flexShrink: 0 }}>{pcs(s.o.probability)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
