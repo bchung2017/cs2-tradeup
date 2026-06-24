@@ -392,14 +392,40 @@ export default function TradeUpConsole() {
 // here yet — paused pending clarification (see the fork report): Skin carries no
 // weapon category, so it needs a weapon→class map, and the requested hierarchy
 // is ambiguous (snipers are rifles in CS2; machineguns/heavies unplaced).
-type OutcomeSortKey = "likelihood-desc" | "likelihood-asc" | "price-desc" | "price-asc";
+type OutcomeSortKey =
+  | "likelihood-desc"
+  | "likelihood-asc"
+  | "price-desc"
+  | "price-asc"
+  | "tier-desc"
+  | "tier-asc";
 
 const OUTCOME_SORTS: { key: OutcomeSortKey; label: string }[] = [
   { key: "likelihood-desc", label: "Likelihood: high → low" },
   { key: "likelihood-asc", label: "Likelihood: low → high" },
   { key: "price-desc", label: "Price: high → low" },
   { key: "price-asc", label: "Price: low → high" },
+  { key: "tier-desc", label: "Weapon tier: high → low" },
+  { key: "tier-asc", label: "Weapon tier: low → high" },
 ];
+
+// Weapon-tier rank (high number = higher tier), per the chosen hierarchy:
+// Sniper > Rifle (machine guns folded in) > SMG/Shotgun > Pistol. Knives &
+// gloves (knife-contract outputs) outrank every gun, so any weapon not in the
+// finite gun list below falls through to the top KNIFE rank.
+const TIER_RANK: Record<string, number> = (() => {
+  const sets: [number, string[]][] = [
+    [4, ["AWP", "SSG 08", "SCAR-20", "G3SG1"]], // sniper
+    [3, ["AK-47", "M4A4", "M4A1-S", "FAMAS", "Galil AR", "AUG", "SG 553", "M249", "Negev"]], // rifle + MGs
+    [2, ["MP9", "MAC-10", "MP7", "MP5-SD", "UMP-45", "P90", "PP-Bizon", "Nova", "XM1014", "MAG-7", "Sawed-Off"]], // smg/shotgun
+    [1, ["Desert Eagle", "R8 Revolver", "Dual Berettas", "Five-SeveN", "Glock-18", "P2000", "P250", "Tec-9", "USP-S", "CZ75-Auto"]], // pistol
+  ];
+  const m: Record<string, number> = {};
+  for (const [rank, names] of sets) for (const n of names) m[n] = rank;
+  return m;
+})();
+const KNIFE_RANK = 5; // knives/gloves and anything not a known gun
+const weaponTierRank = (weapon: string): number => TIER_RANK[weapon] ?? KNIFE_RANK;
 
 // Numeric compare with a fixed direction; null prices sink last either way
 // (same rule the inventory grid uses for unpriced items).
@@ -416,6 +442,7 @@ function sortedOutcomeOrder(outcomes: TradeupOutcome[], key: OutcomeSortKey): nu
   const order = outcomes.map((_, i) => i);
   const prob = (i: number) => outcomes[i].probability;
   const price = (i: number) => outcomes[i].estimatedPrice ?? null;
+  const tier = (i: number) => weaponTierRank(outcomes[i].skin.weapon.name);
   order.sort((a, b) => {
     switch (key) {
       case "likelihood-asc":
@@ -424,6 +451,10 @@ function sortedOutcomeOrder(outcomes: TradeupOutcome[], key: OutcomeSortKey): nu
         return cmpNum(price(a), price(b), -1) || prob(b) - prob(a);
       case "price-asc":
         return cmpNum(price(a), price(b), 1) || prob(b) - prob(a);
+      case "tier-desc":
+        return tier(b) - tier(a) || prob(b) - prob(a);
+      case "tier-asc":
+        return tier(a) - tier(b) || prob(b) - prob(a);
       default: // likelihood-desc — the canonical most-likely-first order
         return prob(b) - prob(a);
     }
