@@ -525,7 +525,11 @@ function OutcomeCard({
       style={{
         position: "relative",
         cursor: "pointer",
-        border: selected ? `1px solid ${color}` : "1px solid var(--line)",
+        // Per-side (not the `border` shorthand) so it doesn't conflict with the
+        // non-shorthand borderTop below — React warns when the two are mixed.
+        borderRight: selected ? `1px solid ${color}` : "1px solid var(--line)",
+        borderBottom: selected ? `1px solid ${color}` : "1px solid var(--line)",
+        borderLeft: selected ? `1px solid ${color}` : "1px solid var(--line)",
         borderTop: `2px solid ${rarity}`,
         background: selected ? "var(--surface)" : "var(--surface-2)",
         padding: "9px 11px 11px",
@@ -941,7 +945,12 @@ function ResultViz({
                       width: "100%",
                       textAlign: "left",
                       background: lit ? "var(--surface-2)" : "transparent",
-                      border: "none",
+                      // Explicit per-side (not the `border` shorthand) so the
+                      // lit-driven borderLeft doesn't conflict with a shorthand
+                      // on rerender — same fix as OutcomeCard.
+                      borderTop: "none",
+                      borderRight: "none",
+                      borderBottom: "none",
                       borderLeft: `3px solid ${lit ? s.color : "transparent"}`,
                       padding: "4px 7px",
                       cursor: "pointer",
