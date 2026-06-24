@@ -642,7 +642,7 @@ function OutcomeCard({
   return (
     <div
       ref={cardRef}
-      className="bracket card-hover"
+      className={`bracket card-hover${selected ? " card-selected" : ""}`}
       onClick={openPrice}
       style={{
         position: "relative",
@@ -662,7 +662,7 @@ function OutcomeCard({
         flexDirection: "column",
         gap: 8,
         scrollMarginTop: 80,
-        transition: "background 0.2s",
+        transition: "background 0.2s, box-shadow 0.15s, transform 0.1s",
       }}
     >
       {idx === 0 && (

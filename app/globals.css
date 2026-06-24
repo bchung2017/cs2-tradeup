@@ -93,6 +93,13 @@ body {
   box-shadow: 0 0 0 1px var(--green-dim), 0 0 16px rgba(51, 255, 51, 0.16);
   transform: translateY(-2px);
 }
+/* Selected/scrolled-to card: the same highlight, but brighter and persistent so
+   the chosen item is unmistakable among the grid (a stronger ring than hover). */
+.card-hover.card-selected,
+.card-hover.card-selected:hover {
+  box-shadow: 0 0 0 2px var(--green), 0 0 22px rgba(51, 255, 51, 0.32);
+  transform: translateY(-2px);
+}
 
 button {
   font-family: var(--mono);
