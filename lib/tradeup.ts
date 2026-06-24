@@ -77,6 +77,36 @@ export function computeTradeup(args: ComputeArgs): TradeupResult {
     throw new Error(`No trade-up possible out of rarity "${inputRarity}".`);
   }
 
+  const allSkins = [...skinById.values()];
+
+  // Eligibility gate: an input whose collection has NO next-tier output (a
+  // max-tier collection) can never produce anything — in CS2 such an item can't
+  // be put into a contract at all. So it's ineligible, not merely "burned":
+  // reject the contract and name the offenders rather than computing a result
+  // whose probabilities silently fail to sum to 1. An input is ineligible when
+  // none of its tradeable (non-excluded) collections contains an output-rarity
+  // skin.
+  const collectionHasOutput = (collectionId: string): boolean =>
+    allSkins.some(
+      (s) =>
+        s.rarity.name === outputRarity &&
+        !s.souvenir &&
+        s.collections.some((c) => c.id === collectionId),
+    );
+  const ineligible = inputSkins.filter(({ skin }) => {
+    const cols = skin.collections.filter((c) => !EXCLUDED_COLLECTIONS.has(c.name));
+    return !cols.some((c) => collectionHasOutput(c.id));
+  });
+  if (ineligible.length) {
+    const names = [...new Set(ineligible.map((x) => x.skin.name))].join(", ");
+    const plural = ineligible.length > 1;
+    throw new Error(
+      `${ineligible.length} input${plural ? "s are" : " is"} ineligible — ` +
+        `their collection has no ${outputRarity} outputs, so ${plural ? "they" : "it"} can't be traded up: ` +
+        `${names}. Remove ${plural ? "them" : "it"} to continue.`,
+    );
+  }
+
   // Average normalized float across all inputs (each normalized to its own skin range).
   const avgNormalized =
     inputSkins.reduce(
@@ -105,7 +135,6 @@ export function computeTradeup(args: ComputeArgs): TradeupResult {
   }
 
   // Build outcomes per collection: each output skin gets prob n_C / (N * k_C).
-  const allSkins = [...skinById.values()];
   const outcomes: TradeupOutcome[] = [];
 
   for (const [collectionId, nC] of nByCollection) {
