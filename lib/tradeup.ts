@@ -41,6 +41,13 @@ export interface ComputeArgs {
   isStatTrak: boolean;
 }
 
+// Catch-all pseudo-collection the catalog dumps standalone/promo skins into
+// (e.g. AK-47 | Aphrodite, Desert Eagle | Heat Treated). It isn't a real
+// tradeable collection — its members span mixed rarities and share no theme —
+// so it must not seed trade-up inputs or outputs, or a Classified input would
+// roll the lone Covert in the bucket. Excluded from the algorithm entirely.
+const EXCLUDED_COLLECTIONS = new Set(["Limited Edition Item"]);
+
 export function computeTradeup(args: ComputeArgs): TradeupResult {
   const { inputs, skinById, prices, isStatTrak } = args;
   const warnings: string[] = [];
@@ -81,9 +88,13 @@ export function computeTradeup(args: ComputeArgs): TradeupResult {
   const nByCollection = new Map<string, number>();
   const collMeta = new Map<string, string>();
   for (const { skin } of inputSkins) {
-    const cols = skin.collections.length ? skin.collections : [];
+    const cols = skin.collections.filter((c) => !EXCLUDED_COLLECTIONS.has(c.name));
     if (!cols.length) {
-      warnings.push(`Skin "${skin.name}" has no collection; it cannot contribute outputs.`);
+      warnings.push(
+        skin.collections.length
+          ? `Skin "${skin.name}" isn't part of a tradeable collection; it cannot contribute outputs.`
+          : `Skin "${skin.name}" has no collection; it cannot contribute outputs.`,
+      );
       continue;
     }
     const share = 1 / cols.length;
