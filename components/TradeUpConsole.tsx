@@ -480,6 +480,22 @@ function Outcomes({
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   useEffect(() => setSelectedIdx(null), [result]); // drop stale selection on recompute
 
+  // Clear the highlight on any click outside a selection-setter. The handler is
+  // added after the selecting click has finished propagating (effect runs post-
+  // commit), so it never clears the very click that set the selection. It does
+  // NOT stopPropagation/preventDefault — the click still does whatever it would
+  // (open a card's price modal, etc.). Clicks on a donut slice / legend row are
+  // skipped (they set a *new* selection that should stand).
+  useEffect(() => {
+    if (selectedIdx == null) return;
+    const onDocClick = (e: MouseEvent) => {
+      if ((e.target as Element | null)?.closest("[data-keep-selection]")) return;
+      setSelectedIdx(null);
+    };
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [selectedIdx]);
+
   // Grid display order (original indices). Donut/legend are unaffected.
   const [sortKey, setSortKey] = useState<OutcomeSortKey>("likelihood-desc");
   const order = useMemo(
@@ -993,6 +1009,7 @@ function ResultViz({
                   strokeWidth={1}
                   opacity={focusIdx == null || lit ? 1 : 0.35}
                   onClick={() => onSelect(s.idx)}
+                  data-keep-selection
                   style={{ cursor: "pointer", transition: "opacity 0.2s" }}
                 >
                   <title>{`${s.o.skin.weapon.name} | ${s.o.skin.name} · ${pcs(s.o.probability)}`}</title>
@@ -1079,6 +1096,7 @@ function ResultViz({
                     key={`${s.o.skin.id}-${s.o.outputWear}`}
                     ref={(el) => { rowRefs.current[s.idx] = el; }}
                     onClick={() => onSelect(s.idx)}
+                    data-keep-selection
                     onMouseEnter={() => setHoveredIdx(s.idx)}
                     onFocus={() => setHoveredIdx(s.idx)}
                     title="Jump to this outcome"
