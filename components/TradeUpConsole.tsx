@@ -462,8 +462,8 @@ function Outcomes({
         style={{
           marginTop: 8,
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
-          gap: 5,
+          gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+          gap: 10,
         }}
       >
         {result.outcomes.map((o, idx) => (
@@ -533,10 +533,10 @@ function OutcomeCard({
         border: selected ? `1px solid ${color}` : "1px solid var(--line)",
         borderTop: `2px solid ${rarity}`,
         background: selected ? "var(--surface)" : "var(--surface-2)",
-        padding: "5px 6px 6px",
+        padding: "9px 11px 11px",
         display: "flex",
         flexDirection: "column",
-        gap: 5,
+        gap: 8,
         scrollMarginTop: 80,
         transition: "box-shadow 0.2s, background 0.2s, border-color 0.2s",
         // ROI-driven inset accent (red→yellow→green); when picked from the
@@ -549,7 +549,7 @@ function OutcomeCard({
       {idx === 0 && (
         <span
           className="hud hud-ember"
-          style={{ position: "absolute", top: 6, right: 7, fontSize: 7 }}
+          style={{ position: "absolute", top: 8, right: 9, fontSize: 9 }}
         >
           ★ TOP
         </span>
@@ -558,7 +558,7 @@ function OutcomeCard({
       {/* item picture, lit by its rarity hue */}
       <div
         style={{
-          height: 42,
+          height: 64,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -570,7 +570,7 @@ function OutcomeCard({
           <img
             src={o.skin.image}
             alt={o.skin.name}
-            style={{ maxWidth: "100%", height: 42, objectFit: "contain" }}
+            style={{ maxWidth: "100%", height: 64, objectFit: "contain" }}
           />
         ) : (
           <span className="hud" style={{ color: "var(--cream-dim)" }}>NO IMG</span>
@@ -581,8 +581,8 @@ function OutcomeCard({
       <div>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <svg
-            width="11"
-            height="11"
+            width="13"
+            height="13"
             viewBox="0 0 12 12"
             style={{ flexShrink: 0, display: "block" }}
             aria-hidden
@@ -591,22 +591,22 @@ function OutcomeCard({
             <circle cx="6" cy="6" r="5.5" fill={color} />
             <path d="M6 6 L6 0.5 A5.5 5.5 0 0 1 10.8 7.5 Z" fill="rgba(0,0,0,0.5)" />
           </svg>
-          <span style={{ fontSize: 8, color: "var(--cream-dim)", letterSpacing: "0.04em" }}>
+          <span style={{ fontSize: 10, color: "var(--cream-dim)", letterSpacing: "0.04em" }}>
             {o.skin.weapon.name}
           </span>
         </div>
-        <div style={{ fontSize: 10, lineHeight: 1.2, marginTop: 1 }}>{o.skin.name}</div>
+        <div style={{ fontSize: 13, lineHeight: 1.25, marginTop: 2 }}>{o.skin.name}</div>
       </div>
 
       {/* wear / float */}
-      <div className="hud" style={{ display: "flex", justifyContent: "space-between", fontSize: 8 }}>
+      <div className="hud" style={{ display: "flex", justifyContent: "space-between", fontSize: 10 }}>
         <span>{o.outputWear}</span>
         <span style={{ color: "var(--amber)" }}>{o.outputFloat.toFixed(4)}</span>
       </div>
 
       {/* hit chance (big) + odds */}
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 15, color: "var(--green)" }}>
+        <span style={{ fontSize: 22, color: "var(--green)" }}>
           {(o.probability * 100).toFixed(1)}%
         </span>
         <span className="hud" style={{ color: "var(--cream-dim)" }}>{oddsString(o.probability)}</span>
@@ -616,11 +616,11 @@ function OutcomeCard({
       <div
         style={{
           borderTop: "1px solid var(--line)",
-          paddingTop: 6,
+          paddingTop: 9,
           display: "flex",
           flexDirection: "column",
-          gap: 2,
-          fontSize: 10,
+          gap: 4,
+          fontSize: 12,
         }}
       >
         <CardRow
