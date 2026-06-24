@@ -854,7 +854,7 @@ function ResultViz({
             flexShrink: 0,
             width: DONUT,
             transform: `translateY(${donutShift}px)`,
-            transition: "transform 0.45s cubic-bezier(0.22, 1, 0.36, 1)",
+            transition: "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
             willChange: "transform",
           }}
         >
@@ -910,7 +910,19 @@ function ResultViz({
             <span className="hud-ember">{slices.length} ITEMS</span>
           </button>
           {legendOpen && (
-            <div ref={listRef} style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+            <div
+              ref={listRef}
+              // Clear the hover only when the cursor / keyboard focus leaves the
+              // whole list — never per row. Resetting on each row's mouseleave
+              // dropped focusIdx to its home value in the gap between rows, so the
+              // donut eased back toward translateY(0) and then to the next row,
+              // which read as jitter when running a finger down the list.
+              onMouseLeave={() => setHoveredIdx(null)}
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) setHoveredIdx(null);
+              }}
+              style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 2 }}
+            >
               {slices.map((s) => {
                 const lit = focusIdx === s.idx;
                 return (
@@ -920,9 +932,7 @@ function ResultViz({
                     ref={(el) => { rowRefs.current[s.idx] = el; }}
                     onClick={() => onSelect(s.idx)}
                     onMouseEnter={() => setHoveredIdx(s.idx)}
-                    onMouseLeave={() => setHoveredIdx(null)}
                     onFocus={() => setHoveredIdx(s.idx)}
-                    onBlur={() => setHoveredIdx(null)}
                     title="Jump to this outcome"
                     style={{
                       display: "flex",
