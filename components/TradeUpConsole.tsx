@@ -521,10 +521,23 @@ function Outcomes({
       <SummaryStats result={result} />
 
       {result.warnings.length > 0 && (
-        <div style={{ marginTop: 16 }}>
+        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
           {result.warnings.map((w, i) => (
-            <div key={i} className="hud hud-amber" style={{ padding: "2px 0" }}>
-              ⚠ {w}
+            <div
+              key={i}
+              className="hud hud-amber"
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                padding: "10px 12px",
+                background: "rgba(255, 194, 51, 0.1)",
+                border: "1px solid rgba(255, 194, 51, 0.4)",
+                lineHeight: 1.5,
+              }}
+            >
+              <span aria-hidden style={{ flexShrink: 0 }}>⚠️</span>
+              <span>{w}</span>
             </div>
           ))}
         </div>
