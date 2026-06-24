@@ -404,9 +404,27 @@ const OUTCOME_SORTS: { key: OutcomeSortKey; label: string }[] = [
   { key: "likelihood-asc", label: "Likelihood: low → high" },
   { key: "price-desc", label: "Price: high → low" },
   { key: "price-asc", label: "Price: low → high" },
-  { key: "ingame-desc", label: "In-game price: high → low" },
-  { key: "ingame-asc", label: "In-game price: low → high" },
+  { key: "ingame-desc", label: "In-game buy price: high → low" },
+  { key: "ingame-asc", label: "In-game buy price: low → high" },
 ];
+
+// CS buy-menu cost of each weapon — the literal price you pay to buy the gun at
+// the start of a round, NOT any market/Steam value. A fixed per-weapon-type
+// constant (independent of skin). Knives/gloves aren't purchasable, so they have
+// no buy price and sort last.
+const WEAPON_BUY_PRICE: Record<string, number> = {
+  // pistols
+  "Glock-18": 200, "USP-S": 200, P2000: 200, P250: 300, "Dual Berettas": 300,
+  "Five-SeveN": 500, "Tec-9": 500, "CZ75-Auto": 500, "R8 Revolver": 600, "Desert Eagle": 700,
+  // smgs
+  "MAC-10": 1050, MP9: 1250, "UMP-45": 1200, "PP-Bizon": 1400, MP7: 1500, "MP5-SD": 1500, P90: 2350,
+  // heavy (shotguns + machine guns)
+  Nova: 1050, "Sawed-Off": 1100, "MAG-7": 1300, "XM1014": 2000, Negev: 1700, "M249": 5200,
+  // rifles
+  "Galil AR": 1800, FAMAS: 2050, "AK-47": 2700, "M4A1-S": 2900, M4A4: 3000, "SG 553": 3000, AUG: 3300,
+  // snipers
+  "SSG 08": 1700, AWP: 4750, "SCAR-20": 5000, G3SG1: 5000,
+};
 
 // Numeric compare with a fixed direction; null prices sink last either way
 // (same rule the inventory grid uses for unpriced items).
@@ -423,10 +441,10 @@ function sortedOutcomeOrder(outcomes: TradeupOutcome[], key: OutcomeSortKey): nu
   const order = outcomes.map((_, i) => i);
   const prob = (i: number) => outcomes[i].probability;
   const price = (i: number) => outcomes[i].estimatedPrice ?? null;
-  // In-game price = the Steam Community Market value (accessed in-game), taken
-  // from the per-source breakdown — distinct from `estimatedPrice`, which is the
-  // blended steam+skinport market average.
-  const ingame = (i: number) => outcomes[i].priceSources?.steam ?? null;
+  // In-game buy price = the CS buy-menu cost of the weapon (AWP 4750, AK-47 2700,
+  // …) — the literal in-round purchase price, NOT a market/Steam value. Looked up
+  // by weapon type; unknown weapons (knives/gloves) sink last.
+  const ingame = (i: number) => WEAPON_BUY_PRICE[outcomes[i].skin.weapon.name] ?? null;
   order.sort((a, b) => {
     switch (key) {
       case "likelihood-asc":
