@@ -382,6 +382,55 @@ export default function TradeUpConsole() {
   );
 }
 
+// ── Outcome-grid sorting ─────────────────────────────────────────────────────
+// The card grid reorders independently of the donut/legend above (which stay
+// canonical most-likely). Sorting returns a display order of the *original*
+// indices, so every card keeps its donut-slice color, scroll ref, and selection
+// mapping no matter how the grid is reordered.
+//
+// Weapon-"tier" sorting (sniper→rifle→smg/shotgun→pistol) is intentionally NOT
+// here yet — paused pending clarification (see the fork report): Skin carries no
+// weapon category, so it needs a weapon→class map, and the requested hierarchy
+// is ambiguous (snipers are rifles in CS2; machineguns/heavies unplaced).
+type OutcomeSortKey = "likelihood-desc" | "likelihood-asc" | "price-desc" | "price-asc";
+
+const OUTCOME_SORTS: { key: OutcomeSortKey; label: string }[] = [
+  { key: "likelihood-desc", label: "Likelihood: high → low" },
+  { key: "likelihood-asc", label: "Likelihood: low → high" },
+  { key: "price-desc", label: "Price: high → low" },
+  { key: "price-asc", label: "Price: low → high" },
+];
+
+// Numeric compare with a fixed direction; null prices sink last either way
+// (same rule the inventory grid uses for unpriced items).
+function cmpNum(a: number | null | undefined, b: number | null | undefined, dir: 1 | -1): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return (a - b) * dir;
+}
+
+// Display order of indices into `outcomes`. Probability breaks price ties so
+// equal-priced items keep a stable, meaningful order.
+function sortedOutcomeOrder(outcomes: TradeupOutcome[], key: OutcomeSortKey): number[] {
+  const order = outcomes.map((_, i) => i);
+  const prob = (i: number) => outcomes[i].probability;
+  const price = (i: number) => outcomes[i].estimatedPrice ?? null;
+  order.sort((a, b) => {
+    switch (key) {
+      case "likelihood-asc":
+        return prob(a) - prob(b);
+      case "price-desc":
+        return cmpNum(price(a), price(b), -1) || prob(b) - prob(a);
+      case "price-asc":
+        return cmpNum(price(a), price(b), 1) || prob(b) - prob(a);
+      default: // likelihood-desc — the canonical most-likely-first order
+        return prob(b) - prob(a);
+    }
+  });
+  return order;
+}
+
 function Outcomes({
   result,
   stattrak,
@@ -397,6 +446,13 @@ function Outcomes({
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
   useEffect(() => setSelectedIdx(null), [result]); // drop stale selection on recompute
+
+  // Grid display order (original indices). Donut/legend are unaffected.
+  const [sortKey, setSortKey] = useState<OutcomeSortKey>("likelihood-desc");
+  const order = useMemo(
+    () => sortedOutcomeOrder(result.outcomes, sortKey),
+    [result.outcomes, sortKey],
+  );
 
   const selectOutcome = (idx: number) => {
     setSelectedIdx(idx);
@@ -434,11 +490,39 @@ function Outcomes({
           paddingTop: 16,
           borderTop: "1px solid var(--line)",
           display: "flex",
+          alignItems: "center",
           justifyContent: "space-between",
+          gap: 12,
+          flexWrap: "wrap",
         }}
       >
         <span>POSSIBLE OUTCOMES</span>
-        <span className="hud-ember">{result.outcomes.length} ITEMS</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span>SORT</span>
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as OutcomeSortKey)}
+            title="Order the outcome grid"
+            style={{
+              background: "var(--void)",
+              color: "var(--amber)",
+              border: "1px solid var(--surface-line)",
+              padding: "4px 8px",
+              fontFamily: "var(--mono)",
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              outline: "none",
+              cursor: "pointer",
+            }}
+          >
+            {OUTCOME_SORTS.map((s) => (
+              <option key={s.key} value={s.key} style={{ background: "var(--void)", color: "var(--amber)" }}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <span className="hud-ember">{result.outcomes.length} ITEMS</span>
+        </div>
       </div>
 
       {/* Outcome grid — one card per possible item, ordered most→least likely.
@@ -451,19 +535,24 @@ function Outcomes({
           gap: 10,
         }}
       >
-        {result.outcomes.map((o, idx) => (
-          <OutcomeCard
-            key={`${o.skin.id}-${o.outputWear}`}
-            o={o}
-            idx={idx}
-            inputCost={result.inputCost}
-            color={PIE_COLORS[idx % PIE_COLORS.length]}
-            stattrak={stattrak}
-            onPrice={onPrice}
-            selected={selectedIdx === idx}
-            cardRef={(el) => { cardRefs.current[idx] = el; }}
-          />
-        ))}
+        {order.map((idx) => {
+          const o = result.outcomes[idx];
+          // idx is the ORIGINAL index — keeps color/ref/selection aligned with
+          // the donut while the grid renders in the chosen sort order.
+          return (
+            <OutcomeCard
+              key={`${o.skin.id}-${o.outputWear}`}
+              o={o}
+              idx={idx}
+              inputCost={result.inputCost}
+              color={PIE_COLORS[idx % PIE_COLORS.length]}
+              stattrak={stattrak}
+              onPrice={onPrice}
+              selected={selectedIdx === idx}
+              cardRef={(el) => { cardRefs.current[idx] = el; }}
+            />
+          );
+        })}
       </div>
     </section>
   );
@@ -525,24 +614,25 @@ function OutcomeCard({
       style={{
         position: "relative",
         cursor: "pointer",
-        // Per-side (not the `border` shorthand) so it doesn't conflict with the
-        // non-shorthand borderTop below — React warns when the two are mixed.
-        borderRight: selected ? `1px solid ${color}` : "1px solid var(--line)",
-        borderBottom: selected ? `1px solid ${color}` : "1px solid var(--line)",
-        borderLeft: selected ? `1px solid ${color}` : "1px solid var(--line)",
-        borderTop: `2px solid ${rarity}`,
-        background: selected ? "var(--surface)" : "var(--surface-2)",
+        // Border is always the rarity hue — thick and bold, and never changes on
+        // selection. Selection is shown by the background tint instead, so the
+        // rarity (border) and pie-slice (background) colors never overlap. Static
+        // value, so the `border` shorthand is safe (no toggling longhand).
+        border: `3px solid ${rarity}`,
+        // Subtle translucent wash in this outcome's pie-slice color — this is the
+        // slice association now that the pie glyph is gone; deepens when selected.
+        background: selected
+          ? `linear-gradient(${color}3d, ${color}3d), var(--surface-2)`
+          : `linear-gradient(${color}14, ${color}14), var(--surface-2)`,
         padding: "9px 11px 11px",
         display: "flex",
         flexDirection: "column",
         gap: 8,
         scrollMarginTop: 80,
-        transition: "box-shadow 0.2s, background 0.2s, border-color 0.2s",
-        // ROI-driven inset accent (red→yellow→green); when picked from the
-        // distribution legend/donut, add an outer ring + glow in its slice color.
-        boxShadow: selected
-          ? [insetBar, `0 0 0 2px ${color}`, `0 0 18px ${color}99`].filter(Boolean).join(", ")
-          : insetBar || undefined,
+        transition: "box-shadow 0.2s, background 0.2s",
+        // ROI-driven inset accent (red→yellow→green). No pie-colored ring on
+        // selection — the background tint carries that now.
+        boxShadow: insetBar || undefined,
       }}
     >
       {idx === 0 && (
@@ -576,24 +666,11 @@ function OutcomeCard({
         )}
       </div>
 
-      {/* weapon + name, with a pie-chart glyph in this outcome's donut-slice color */}
+      {/* weapon + name */}
       <div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 12 12"
-            style={{ flexShrink: 0, display: "block" }}
-            aria-hidden
-          >
-            <title>this outcome&apos;s pie-chart slice color</title>
-            <circle cx="6" cy="6" r="5.5" fill={color} />
-            <path d="M6 6 L6 0.5 A5.5 5.5 0 0 1 10.8 7.5 Z" fill="rgba(0,0,0,0.5)" />
-          </svg>
-          <span style={{ fontSize: 10, color: "var(--cream-dim)", letterSpacing: "0.04em" }}>
-            {o.skin.weapon.name}
-          </span>
-        </div>
+        <span style={{ fontSize: 10, color: "var(--cream-dim)", letterSpacing: "0.04em" }}>
+          {o.skin.weapon.name}
+        </span>
         <div style={{ fontSize: 13, lineHeight: 1.25, marginTop: 2 }}>{o.skin.name}</div>
       </div>
 
