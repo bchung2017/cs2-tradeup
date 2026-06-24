@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { usd } from "@/lib/display";
 
 // ---------------------------------------------------------------------------
@@ -143,15 +144,21 @@ export default function PriceModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Portal to <body> so the overlay escapes any transformed/filtered ancestor
+  // panel (which would otherwise trap position:fixed and let the opposite side
+  // paint over it). document is absent during SSR, so mount-gate the portal.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const sources = priceSources ?? {};
 
-  return (
+  const overlay = (
     <div
       onClick={onClose}
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: 50,
+        zIndex: 1000,
         background: "rgba(0,0,0,0.72)",
         display: "flex",
         alignItems: "center",
@@ -249,6 +256,9 @@ export default function PriceModal({
       </div>
     </div>
   );
+
+  if (!mounted) return null;
+  return createPortal(overlay, document.body);
 }
 
 // Build a Steam-style market_hash_name from parts, so the left-side trade-up
