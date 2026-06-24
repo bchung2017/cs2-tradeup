@@ -180,23 +180,25 @@ export default function PriceModal({
           padding: "18px 20px 20px",
         }}
       >
+        {image && (
+          // Full-width hero render of the skin — much larger than a header
+          // thumbnail, sized to the modal width since skin art is landscape.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={image}
+            alt=""
+            style={{
+              width: "100%",
+              height: 150,
+              marginBottom: 14,
+              objectFit: "contain",
+              background: "var(--void)",
+              border: "1px solid var(--surface-line)",
+            }}
+          />
+        )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {image && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={image}
-                alt=""
-                style={{
-                  width: 56,
-                  height: 56,
-                  flexShrink: 0,
-                  objectFit: "contain",
-                  background: "var(--void)",
-                  border: "1px solid var(--surface-line)",
-                }}
-              />
-            )}
             <div>
               <span className="hud hud-ember">MARKET PRICES</span>
               <div style={{ fontSize: 14, marginTop: 6, color: "var(--cream)", lineHeight: 1.35 }}>
