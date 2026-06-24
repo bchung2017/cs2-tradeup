@@ -39,12 +39,13 @@ export default function TradeUpConsole() {
     return first?.skin?.rarity.name ?? null;
   }, [slots]);
 
-  function pick(i: number, skin: Skin) {
+  function pick(i: number, skin: Skin, float: number) {
     setSlots((prev) => {
       const next = [...prev];
       // Catalog picks carry no StatTrak; inherit the contract's current state.
-      // No market price is resolved for catalog picks, so price stays null.
-      next[i] = { skin, float: skin.min_float, stattrak: prev.find((s) => s.skin)?.stattrak ?? false, price: null };
+      // Float comes from the picker's wear/float form (a realistic in-game value
+      // instead of 0.00). No market price is resolved for catalog picks.
+      next[i] = { skin, float, stattrak: prev.find((s) => s.skin)?.stattrak ?? false, price: null };
       return next;
     });
     setPickerFor(null);
@@ -369,7 +370,7 @@ export default function TradeUpConsole() {
         open={pickerFor !== null}
         lockedRarity={lockedRarity}
         onClose={() => setPickerFor(null)}
-        onPick={(skin) => pickerFor !== null && pick(pickerFor, skin)}
+        onPick={(skin, float) => pickerFor !== null && pick(pickerFor, skin, float)}
       />
 
       {priceModal && (

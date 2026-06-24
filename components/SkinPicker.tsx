@@ -1,21 +1,52 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Rarity, Skin } from "@/types/cs2";
+import { WEAR_RANGES } from "@/types/cs2";
+import type { Rarity, Skin, Wear } from "@/types/cs2";
 import { rarityColor } from "@/lib/display";
 
 interface Props {
   open: boolean;
   lockedRarity: Rarity | null; // null = first pick, any rarity allowed
-  onPick: (skin: Skin) => void;
+  // The chosen float (from the wear/float form) is applied to whatever skin is
+  // clicked, clamped to that skin's valid range.
+  onPick: (skin: Skin, float: number) => void;
   onClose: () => void;
 }
+
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
+// Mid-point of a wear band, rounded to hundredths — a realistic stand-in for an
+// in-game float, vs. the 0.00 default that almost never occurs and skews prices.
+function wearAvg(w: Wear): number {
+  const r = WEAR_RANGES.find((x) => x.wear === w)!;
+  return Math.round(((r.min + r.max) / 2) * 100) / 100;
+}
+
+const DEFAULT_WEAR: Wear = "Field-Tested";
 
 export default function SkinPicker({ open, lockedRarity, onPick, onClose }: Props) {
   const [q, setQ] = useState("");
   const [skins, setSkins] = useState<Skin[]>([]);
   const [loading, setLoading] = useState(false);
+  // Wear/float form — the float here is applied to whichever skin is clicked.
+  const [wear, setWear] = useState<Wear>(DEFAULT_WEAR);
+  const [floatStr, setFloatStr] = useState<string>(() => wearAvg(DEFAULT_WEAR).toFixed(2));
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Selecting a wear band sets the float to that band's average (editable after).
+  function selectWear(w: Wear) {
+    setWear(w);
+    setFloatStr(wearAvg(w).toFixed(2));
+  }
+
+  // Resolve the form's float for a given skin: parse, fall back to the wear
+  // average when blank/invalid, then clamp to the skin's valid float range.
+  function floatFor(s: Skin): number {
+    const parsed = parseFloat(floatStr);
+    const base = Number.isFinite(parsed) ? parsed : wearAvg(wear);
+    return clamp(base, s.min_float, s.max_float);
+  }
 
   useEffect(() => {
     if (open) {
@@ -83,6 +114,57 @@ export default function SkinPicker({ open, lockedRarity, onPick, onClose }: Prop
           </span>
         </div>
 
+        {/* wear/float form — applied to whichever skin is clicked below, so
+            picks land on a realistic in-game float instead of 0.00 */}
+        <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "flex-end" }}>
+          <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+            <span className="hud">WEAR</span>
+            <select
+              value={wear}
+              onChange={(e) => selectWear(e.target.value as Wear)}
+              style={{
+                background: "var(--void)",
+                border: "1px solid var(--line)",
+                color: "var(--cream)",
+                padding: "9px 10px",
+                fontSize: 13,
+                outline: "none",
+              }}
+            >
+              {WEAR_RANGES.map((r) => (
+                <option key={r.wear} value={r.wear}>
+                  {r.wear} ({r.min.toFixed(2)}–{r.max.toFixed(2)})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ width: 110, display: "flex", flexDirection: "column", gap: 4 }}>
+            <span className="hud">FLOAT</span>
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.01}
+              value={floatStr}
+              onChange={(e) => setFloatStr(e.target.value)}
+              onBlur={() => {
+                const n = parseFloat(floatStr);
+                setFloatStr((Number.isFinite(n) ? clamp(n, 0, 1) : wearAvg(wear)).toFixed(2));
+              }}
+              style={{
+                background: "var(--void)",
+                border: "1px solid var(--line)",
+                color: "var(--amber)",
+                fontFamily: "var(--mono)",
+                padding: "9px 10px",
+                fontSize: 13,
+                outline: "none",
+                width: "100%",
+              }}
+            />
+          </label>
+        </div>
+
         <input
           ref={inputRef}
           value={q}
@@ -107,7 +189,7 @@ export default function SkinPicker({ open, lockedRarity, onPick, onClose }: Prop
           {skins.map((s) => (
             <button
               key={s.id}
-              onClick={() => onPick(s)}
+              onClick={() => onPick(s, floatFor(s))}
               style={{
                 display: "flex",
                 width: "100%",
