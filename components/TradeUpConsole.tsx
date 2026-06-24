@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import CircuitBoard from "@/components/CircuitBoard";
 import SkinPicker from "@/components/SkinPicker";
 import PriceModal, { marketName, wearFromFloat } from "@/components/PriceModal";
@@ -392,6 +392,19 @@ function Outcomes({
   onPrice: (name: string, priceSources?: Record<string, number> | null) => void;
 }) {
   const profitable = result.profitEV >= 0;
+
+  // The currently spotlighted outcome. Clicking a donut slice or legend title
+  // selects it: the matching card below scrolls into view and lights up. One
+  // ref per card lets us scroll directly to it.
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  useEffect(() => setSelectedIdx(null), [result]); // drop stale selection on recompute
+
+  const selectOutcome = (idx: number) => {
+    setSelectedIdx(idx);
+    cardRefs.current[idx]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   return (
     <section
       style={{
@@ -427,7 +440,7 @@ function Outcomes({
         </div>
       )}
 
-      <ResultViz result={result} />
+      <ResultViz result={result} selectedIdx={selectedIdx} onSelect={selectOutcome} />
 
       <div
         className="hud"
@@ -462,6 +475,8 @@ function Outcomes({
             color={PIE_COLORS[idx % PIE_COLORS.length]}
             stattrak={stattrak}
             onPrice={onPrice}
+            selected={selectedIdx === idx}
+            cardRef={(el) => { cardRefs.current[idx] = el; }}
           />
         ))}
       </div>
@@ -488,6 +503,8 @@ function OutcomeCard({
   color,
   stattrak,
   onPrice,
+  selected,
+  cardRef,
 }: {
   o: TradeupOutcome;
   idx: number;
@@ -495,6 +512,8 @@ function OutcomeCard({
   color: string;
   stattrak: boolean;
   onPrice: (name: string, priceSources?: Record<string, number> | null) => void;
+  selected: boolean;
+  cardRef: (el: HTMLDivElement | null) => void;
 }) {
   const land = o.estimatedPrice != null ? o.estimatedPrice - inputCost : null;
   const roi =
@@ -503,21 +522,28 @@ function OutcomeCard({
       : null;
   const rarity = rarityHex(o.skin.rarity.name);
   const spectrum = roiColor(roi);
+  const insetBar = roi == null ? "" : `inset 4px 0 0 0 ${spectrum}`;
 
   return (
     <div
+      ref={cardRef}
       className="bracket"
       style={{
         position: "relative",
-        border: "1px solid var(--line)",
+        border: selected ? `1px solid ${color}` : "1px solid var(--line)",
         borderTop: `2px solid ${rarity}`,
-        background: "var(--surface-2)",
+        background: selected ? "var(--surface)" : "var(--surface-2)",
         padding: "5px 6px 6px",
         display: "flex",
         flexDirection: "column",
         gap: 5,
-        // ROI-driven highlight: an inset accent bar shaded red→yellow→green.
-        boxShadow: roi == null ? undefined : `inset 4px 0 0 0 ${spectrum}`,
+        scrollMarginTop: 80,
+        transition: "box-shadow 0.2s, background 0.2s, border-color 0.2s",
+        // ROI-driven inset accent (red→yellow→green); when picked from the
+        // distribution legend/donut, add an outer ring + glow in its slice color.
+        boxShadow: selected
+          ? [insetBar, `0 0 0 2px ${color}`, `0 0 18px ${color}99`].filter(Boolean).join(", ")
+          : insetBar || undefined,
       }}
     >
       {idx === 0 && (
@@ -696,7 +722,15 @@ function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: nu
 
 // Below-the-fold visualizers for a computed contract: an outcome-probability
 // donut, the chance you come out ahead, and a cost-vs-EV comparison.
-function ResultViz({ result }: { result: TradeupResult }) {
+function ResultViz({
+  result,
+  selectedIdx,
+  onSelect,
+}: {
+  result: TradeupResult;
+  selectedIdx: number | null;
+  onSelect: (idx: number) => void;
+}) {
   const { outcomes, inputCost, expectedValue } = result;
   const totalProb = outcomes.reduce((a, o) => a + o.probability, 0) || 1;
 
@@ -724,27 +758,37 @@ function ResultViz({ result }: { result: TradeupResult }) {
       style={{
         marginTop: 22,
         display: "grid",
-        gridTemplateColumns: "minmax(220px, 280px) 1fr",
+        gridTemplateColumns: "minmax(260px, 340px) 1fr",
         gap: 28,
         alignItems: "start",
         paddingTop: 18,
         borderTop: "1px solid var(--line)",
       }}
     >
-      {/* outcome probability donut */}
+      {/* outcome probability donut + full legend beneath it */}
       <div>
-        <div className="hud" style={{ marginBottom: 8 }}>OUTCOME DISTRIBUTION</div>
-        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-          <svg viewBox="0 0 160 160" style={{ width: 130, height: 130, flexShrink: 0 }}>
-            {slices.map((s) => (
-              <path
-                key={`${s.o.skin.id}-${s.o.outputWear}`}
-                d={arcPath(80, 80, 76, s.start, s.end)}
-                fill={s.color}
-                stroke="var(--void)"
-                strokeWidth={1}
-              />
-            ))}
+        <div className="hud" style={{ marginBottom: 10 }}>OUTCOME DISTRIBUTION</div>
+        {/* The donut now spans the whole column (it used to share the row with a
+            cramped legend). Slices are clickable and dim when another is picked. */}
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <svg viewBox="0 0 160 160" style={{ width: 200, height: 200, flexShrink: 0 }}>
+            {slices.map((s) => {
+              const active = selectedIdx === s.idx;
+              return (
+                <path
+                  key={`${s.o.skin.id}-${s.o.outputWear}`}
+                  d={arcPath(80, 80, active ? 79 : 76, s.start, s.end)}
+                  fill={s.color}
+                  stroke="var(--void)"
+                  strokeWidth={1}
+                  opacity={selectedIdx == null || active ? 1 : 0.35}
+                  onClick={() => onSelect(s.idx)}
+                  style={{ cursor: "pointer", transition: "opacity 0.2s" }}
+                >
+                  <title>{`${s.o.skin.weapon.name} | ${s.o.skin.name} · ${pcs(s.o.probability)}`}</title>
+                </path>
+              );
+            })}
             <circle cx={80} cy={80} r={40} fill="rgba(2, 8, 2, 0.92)" />
             <text x={80} y={76} textAnchor="middle" fontSize={11} fill="var(--cream-dim)">
               {outcomes.length}
@@ -753,31 +797,54 @@ function ResultViz({ result }: { result: TradeupResult }) {
               OUTCOMES
             </text>
           </svg>
-          {/* Full legend, scrollable so every outcome is reachable — the donut
-              can have far more slices than fit beside it. Height tracks the
-              130px donut; overflow scrolls the overflow instead of hiding it. */}
-          <div
-            style={{
-              fontSize: 10,
-              lineHeight: 1.5,
-              minWidth: 0,
-              flex: 1,
-              maxHeight: 130,
-              overflowY: "auto",
-              paddingRight: 4,
-            }}
-          >
-            {slices.map((s) => (
-              <div
+        </div>
+        {/* Full legend — no scroll, no truncation, every title shown in full.
+            Each row jumps to + highlights its outcome card below. The section
+            grows with the outcome count instead of hiding rows behind a scroll. */}
+        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 2 }}>
+          {slices.map((s) => {
+            const active = selectedIdx === s.idx;
+            return (
+              <button
+                type="button"
                 key={`${s.o.skin.id}-${s.o.outputWear}`}
-                style={{ display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
+                onClick={() => onSelect(s.idx)}
+                title="Jump to this outcome"
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 8,
+                  width: "100%",
+                  textAlign: "left",
+                  background: active ? "var(--surface-2)" : "transparent",
+                  border: "none",
+                  borderLeft: `3px solid ${active ? s.color : "transparent"}`,
+                  padding: "4px 7px",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  lineHeight: 1.35,
+                  color: active ? "var(--cream)" : "var(--cream-dim)",
+                  transition: "background 0.15s, color 0.15s",
+                }}
               >
-                <span style={{ width: 8, height: 8, background: s.color, flexShrink: 0 }} />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{s.o.skin.name}</span>
-                <span className="hud" style={{ marginLeft: "auto", flexShrink: 0 }}>{pcs(s.o.probability)}</span>
-              </div>
-            ))}
-          </div>
+                <span
+                  style={{
+                    width: 9,
+                    height: 9,
+                    background: s.color,
+                    flexShrink: 0,
+                    alignSelf: "center",
+                  }}
+                />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ color: "var(--cream-dim)" }}>{s.o.skin.weapon.name} | </span>
+                  {s.o.skin.name}{" "}
+                  <span className="hud" style={{ fontSize: 8 }}>{s.o.outputWear}</span>
+                </span>
+                <span className="hud" style={{ flexShrink: 0 }}>{pcs(s.o.probability)}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
