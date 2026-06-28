@@ -92,6 +92,19 @@ function initStore(): SteamStore {
       paint_index INTEGER,
       fetched_at INTEGER NOT NULL
     );
+    -- Carried-over profiles: basic Steam profile info (persona + avatar sourced
+    -- from the same community account the trade inventory comes from), persisted
+    -- so previously-viewed profiles survive restarts. See lib/profile.ts.
+    CREATE TABLE IF NOT EXISTS profiles (
+      steamid TEXT PRIMARY KEY,
+      persona TEXT,
+      avatar TEXT,
+      profile_url TEXT,
+      online_state TEXT,
+      member_since TEXT,
+      first_seen INTEGER NOT NULL,
+      last_seen INTEGER NOT NULL
+    );
     -- The standalone deep-sync float resolver is gone: floats are now decoded
     -- locally at sync time. Drop the obsolete job table (and any stale rows).
     DROP TABLE IF EXISTS deep_sync_jobs;`);
@@ -111,6 +124,12 @@ function initStore(): SteamStore {
 // just to collect page data) from racing to open loader.db in WAL mode.
 function getStore(): SteamStore {
   return globalThis.__steamStore ?? (globalThis.__steamStore = initStore());
+}
+
+// Shared loader.db handle for sibling modules (e.g. lib/profile.ts) so the whole
+// app keeps a single pinned connection rather than opening the WAL file twice.
+export function getDb(): Database.Database {
+  return getStore().db;
 }
 
 // Errors carry a `code` so route handlers can map them to HTTP status, exactly

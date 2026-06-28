@@ -4,6 +4,7 @@ node_modules/
 loader.db
 loader.db-shm
 loader.db-wal
+.dev-supervisor.pid
 
 # build artifacts
 *.tsbuildinfo

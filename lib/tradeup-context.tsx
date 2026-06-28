@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Rarity, Skin } from "@/types/cs2";
 import type { InventoryItem } from "@/lib/steam";
+import { takeHandoff } from "@/lib/contract-handoff";
 
 export interface Slot {
   skin: Skin | null;
@@ -162,6 +163,16 @@ export function TradeupProvider({ children }: { children: React.ReactNode }) {
 
   // Contract size is purely derived from the (already auto-sized) grid.
   const count = slots.length;
+
+  // One-time hydration from a Research Lab "Load into Simulator" handoff. The
+  // research view stashed a contract's inputs in sessionStorage before
+  // navigating here; pick them up, stage them, and clear. Runs once on mount.
+  useEffect(() => {
+    const staged = takeHandoff();
+    if (staged) setSlots(staged.map((s) => ({ ...s })));
+    // setSlots is stable (useCallback); intentionally mount-only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const addFromInventory = useCallback((item: InventoryItem) => {
     const prev = slotsRef.current;

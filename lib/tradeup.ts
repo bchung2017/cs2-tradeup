@@ -46,7 +46,7 @@ export interface ComputeArgs {
 // tradeable collection — its members span mixed rarities and share no theme —
 // so it must not seed trade-up inputs or outputs, or a Classified input would
 // roll the lone Covert in the bucket. Excluded from the algorithm entirely.
-const EXCLUDED_COLLECTIONS = new Set(["Limited Edition Item"]);
+export const EXCLUDED_COLLECTIONS = new Set(["Limited Edition Item"]);
 
 export function computeTradeup(args: ComputeArgs): TradeupResult {
   const { inputs, skinById, prices, isStatTrak } = args;

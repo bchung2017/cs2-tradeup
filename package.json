@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:watch": "node scripts/dev-supervisor.mjs",
+    "reload": "node scripts/dev-reload.mjs",
     "build": "next build",
     "start": "next start",
     "fetch-data": "tsx scripts/fetch-data.ts",
