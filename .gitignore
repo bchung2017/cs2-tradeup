@@ -15,3 +15,6 @@ claude-code-main/
 
 # malformed dir from a botched command
 {types,lib,app,components,scripts,public/
+
+# secrets / local env
+.env*.local

@@ -5,13 +5,18 @@
  *
  * Run: npx tsx scripts/spam-check.ts
  */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadPrices, loadSkinById } from "../lib/data";
 import { findSpamTradeups, targetForWear } from "../lib/spam-search";
 
 const skinById = loadSkinById();
 const prices = loadPrices();
+const fpPath = join(process.cwd(), "public", "data", "floatprices.json");
+const floatPrices = existsSync(fpPath) ? (JSON.parse(readFileSync(fpPath, "utf8")) as Record<string, number>) : undefined;
+console.log(floatPrices ? `[float prices: ${Object.keys(floatPrices).length} entries]` : "[float prices: none — bucket proxy]");
 
-const contracts = findSpamTradeups({ skinById, prices, targetAvgFloat: targetForWear("Field-Tested"), limit: 500 });
+const contracts = findSpamTradeups({ skinById, prices, targetAvgFloat: targetForWear("Field-Tested"), limit: 500, floatPrices });
 
 const fmt = (n: number | null | undefined) => (n == null ? "—" : `$${n.toFixed(2)}`);
 function show(c: (typeof contracts)[number]) {

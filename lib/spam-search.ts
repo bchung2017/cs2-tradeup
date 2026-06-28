@@ -15,6 +15,16 @@ const N = 10;
 export const DEFAULT_FEE = 0.15;
 const EPS = 0.001;
 
+// Float ceilings we cache CSFloat "cheapest under X" prices at (see scripts/
+// sync-floatprices + lib/csfloat). The solver prices a steering slot at the
+// largest tier ≤ its required float ceiling.
+export const FLOAT_TIERS = [0.1, 0.14, 0.18, 0.22, 0.26, 0.3, 0.34, 0.38];
+function tierFor(ceiling: number): number | null {
+  let t: number | null = null;
+  for (const x of FLOAT_TIERS) if (x <= ceiling + EPS) t = x; else break;
+  return t;
+}
+
 const wearMid = (w: Wear) => {
   const r = WEAR_RANGES.find((x) => x.wear === w)!;
   return (r.min + r.max) / 2;
@@ -69,6 +79,9 @@ export interface SpamArgs {
   fee?: number;
   targetAvgFloat?: number; // the configurable knob (default = Field-Tested)
   limit?: number;
+  // CSFloat float-indexed steering prices, keyed `${skinId}|${tag}|${tier}` —
+  // when present, the solver prices steering slots from real sub-float listings.
+  floatPrices?: Record<string, number>;
 }
 
 /** cheapest median (+ the skin) among a pool at a given wear/tag. */
@@ -79,6 +92,27 @@ function cheapestAt(pool: Skin[], wear: Wear, tag: string, prices: PriceTable) {
     if (p != null && (best == null || p < best.price)) best = { skin: s, price: p };
   }
   return best;
+}
+
+/** Cheapest steering input under a float ceiling. Uses CSFloat float-indexed
+ *  prices when available (the largest cached tier ≤ ceiling); else the flat
+ *  wear-bucket median as a proxy. */
+function cheapestSteer(
+  pool: Skin[], steerFloat: number, steerWear: Wear, tag: string,
+  prices: PriceTable, floatPrices?: Record<string, number>,
+) {
+  if (floatPrices) {
+    const tier = tierFor(steerFloat);
+    if (tier != null) {
+      let best: { skin: Skin; price: number } | null = null;
+      for (const s of pool) {
+        const p = floatPrices[`${s.id}|${tag}|${tier}`];
+        if (p != null && (best == null || p < best.price)) best = { skin: s, price: p };
+      }
+      if (best) return best;
+    }
+  }
+  return cheapestAt(pool, steerWear, tag, prices);
 }
 
 export function findSpamTradeups(args: SpamArgs): SpamContract[] {
@@ -110,7 +144,7 @@ export function findSpamTradeups(args: SpamArgs): SpamContract[] {
       if (inputs.length === 0 || outputs.length === 0) continue;
 
       for (const tag of ["norm", "st"] as const) {
-        const recipe = solveRecipe(inputs, A, tag, prices);
+        const recipe = solveRecipe(inputs, A, tag, prices, args.floatPrices);
         if (!recipe) continue;
         const scored = scoreRun(recipe, collId, name, inputRarity, outputRarity, tag, skinById, prices, net);
         if (scored) out.push(scored);
@@ -123,7 +157,7 @@ export function findSpamTradeups(args: SpamArgs): SpamContract[] {
 }
 
 /** Derive the cheapest filler-exterior + steering split that guarantees avg ≤ A. */
-function solveRecipe(inputs: Skin[], A: number, tag: string, prices: PriceTable): SpamRecipe | null {
+function solveRecipe(inputs: Skin[], A: number, tag: string, prices: PriceTable, floatPrices?: Record<string, number>): SpamRecipe | null {
   // representative float range (use the median-range skin; most CS2 skins are 0–1)
   const rep = inputs[0];
   const repNorm = (f: number) => norm(f, rep.min_float, rep.max_float);
@@ -144,7 +178,7 @@ function solveRecipe(inputs: Skin[], A: number, tag: string, prices: PriceTable)
       if (ncMax <= 0 || ncMax >= nf) continue; // infeasible or steering not lower-float than filler
       const steerFloat = denorm(ncMax, rep.min_float, rep.max_float);
       const steerWear = floatToWear(steerFloat);
-      const steer = cheapestAt(inputs, steerWear, tag, prices);
+      const steer = cheapestSteer(inputs, steerFloat, steerWear, tag, prices, floatPrices);
       if (!steer) continue;
       const cost = a * filler.price + b * steer.price;
       if (best == null || cost < best.cost) {

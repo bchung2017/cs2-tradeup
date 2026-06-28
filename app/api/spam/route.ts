@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextResponse } from "next/server";
 import { loadPrices, loadSkinById } from "@/lib/data";
 import { DEFAULT_FEE, findSpamTradeups, targetForWear } from "@/lib/spam-search";
@@ -7,6 +9,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const WEARS = new Set(WEAR_RANGES.map((w) => w.wear));
+
+// CSFloat float-indexed steering prices (sync with `npm run sync-floatprices`).
+// Optional — absent means the solver uses the wear-bucket-median proxy.
+let floatCache: Record<string, number> | null | undefined;
+function loadFloatPrices(): Record<string, number> | undefined {
+  if (floatCache !== undefined) return floatCache ?? undefined;
+  try {
+    floatCache = JSON.parse(readFileSync(join(process.cwd(), "public", "data", "floatprices.json"), "utf8"));
+  } catch {
+    floatCache = null;
+  }
+  return floatCache ?? undefined;
+}
 
 // GET /api/spam?wear=Field-Tested&fee=0.15&limit=60
 // Market-wide spam-trade-up finder: for every collection, derive the cheapest
@@ -23,13 +38,15 @@ export async function GET(req: Request) {
   const limitParam = Number(url.searchParams.get("limit"));
   const limit = Number.isInteger(limitParam) && limitParam > 0 && limitParam <= 300 ? limitParam : 80;
 
+  const floatPrices = loadFloatPrices();
   const contracts = findSpamTradeups({
     skinById: loadSkinById(),
     prices: loadPrices(),
     fee,
     targetAvgFloat: targetForWear(targetWear),
     limit,
+    floatPrices,
   });
 
-  return NextResponse.json({ fee, targetWear, contracts });
+  return NextResponse.json({ fee, targetWear, floatPriced: !!floatPrices, contracts });
 }
