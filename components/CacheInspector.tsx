@@ -156,7 +156,10 @@ export default function CacheInspector() {
 
       {report && (
         <div className="hud" style={{ marginTop: 12 }}>
-          loader.db // {bytes(report.db.bytes)} //{" "}
+          <span style={{ color: report.backend === "postgres" ? "var(--profit)" : "var(--amber)" }}>
+            {report.backend === "postgres" ? "postgres (persistent)" : "sqlite (ephemeral)"}
+          </span>{" "}
+          // {bytes(report.db.bytes)} //{" "}
           {report.db.files.map((f) => `${f.name.replace("loader.db", "db")}:${bytes(f.bytes)}`).join("  ")}
         </div>
       )}

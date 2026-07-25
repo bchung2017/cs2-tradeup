@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ steamid: string }> }) {
   const { steamid } = await ctx.params;
-  const snap = getSnapshot(steamid);
+  const snap = await getSnapshot(steamid);
   if (!snap) {
     console.log(`[inventory] steamid=${steamid} -> no snapshot (sync first)`);
     return NextResponse.json({ error: "no snapshot" }, { status: 404 });
