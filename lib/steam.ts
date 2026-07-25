@@ -35,7 +35,7 @@ export interface InventoryItem {
   paint_index?: number | null;
   meta_fetched_at?: number | null;
   // Median market price, resolved at read time from the price table by market
-  // name + wear (see priceForMarketName). Null for items with no priced wear.
+  // name + wear (see priceEntryForMarketName). Null for items with no priced wear.
   price?: number | null;
   // Per-marketplace prices that fed the median (e.g. { steam, skinport }),
   // attached alongside `price` so the inventory card's price modal can show
@@ -54,10 +54,10 @@ export interface Snapshot {
   count: number;
 }
 
-export const FLOOR_MS = 60_000; // 60s anti-429 floor
+const FLOOR_MS = 60_000; // 60s anti-429 floor
 
 // Per-item metadata that never changes for a given assetid (float / paint).
-export interface ItemMeta {
+interface ItemMeta {
   float: number | null;
   paint_seed: number | null;
   paint_index: number | null;
@@ -78,7 +78,7 @@ declare global {
 }
 
 function initStore(): SteamStore {
-  const db = new Database(join(process.cwd(), "loader.db"));
+  const db = new Database(join(/*turbopackIgnore: true*/ process.cwd(), "loader.db"));
   db.exec(`PRAGMA journal_mode=WAL;
     CREATE TABLE IF NOT EXISTS snapshots (
       steamid TEXT PRIMARY KEY,
@@ -352,25 +352,11 @@ export interface SnapshotReport {
   health: Health;
 }
 
-export interface JobReport {
-  steamid: string;
-  status: string;
-  total: number;
-  done: number;
-  error: string | null;
-  started_at: number;
-  updated_at: number;
-  health: Health;
-}
-
 export interface CacheReport {
   db: { bytes: number; files: { name: string; bytes: number }[] };
   snapshots: SnapshotReport[];
   meta: { total: number; orphans: number; outOfRange: number };
-  jobs: JobReport[];
 }
-
-const JOB_STALE_MS = 30_000;
 
 export function getCacheReport(): CacheReport {
   const store = getStore();
@@ -434,42 +420,21 @@ export function getCacheReport(): CacheReport {
   let orphans = 0;
   for (const m of metaIds) if (!allAssetIds.has(m.assetid)) orphans++;
 
-  // deep_sync_jobs is created in a later phase; tolerate its absence.
-  let jobs: JobReport[] = [];
-  const hasJobs = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='deep_sync_jobs'")
-    .get();
-  if (hasJobs) {
-    const jr = db
-      .prepare("SELECT steamid, status, total, done, error, started_at, updated_at FROM deep_sync_jobs")
-      .all() as Array<Omit<JobReport, "health">>;
-    jobs = jr.map((j) => {
-      const health: Health =
-        j.done > j.total
-          ? "corrupt"
-          : j.status === "paused" || (j.status === "running" && Date.now() - j.updated_at > JOB_STALE_MS)
-            ? "warn"
-            : "ok";
-      return { ...j, health };
-    });
-  }
-
   const files = ["loader.db", "loader.db-wal", "loader.db-shm"].map((name) => {
     try {
-      return { name, bytes: statSync(join(process.cwd(), name)).size };
+      return { name, bytes: statSync(join(/*turbopackIgnore: true*/ process.cwd(), name)).size };
     } catch {
       return { name, bytes: 0 };
     }
   });
   const bytes = files.reduce((a, f) => a + f.bytes, 0);
 
-  return { db: { bytes, files }, snapshots, meta: { total: metaTotal, orphans, outOfRange }, jobs };
+  return { db: { bytes, files }, snapshots, meta: { total: metaTotal, orphans, outOfRange } };
 }
 
-export interface ClearResult {
+interface ClearResult {
   snapshots: number;
   meta: number;
-  jobs: number;
 }
 
 /**
@@ -482,9 +447,6 @@ export interface ClearResult {
 export function clearCache(steamid?: string): ClearResult {
   const store = getStore();
   const db = store.db;
-  const hasJobs = !!db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='deep_sync_jobs'")
-    .get();
 
   if (steamid) {
     // item_meta is keyed by assetid, so scope its delete to this snapshot's assets.
@@ -504,16 +466,14 @@ export function clearCache(steamid?: string): ClearResult {
       }
     }
     const snapshots = db.prepare("DELETE FROM snapshots WHERE steamid=?").run(steamid).changes;
-    const jobs = hasJobs ? db.prepare("DELETE FROM deep_sync_jobs WHERE steamid=?").run(steamid).changes : 0;
     store.lastSync.delete(steamid);
     store.inflight.delete(steamid);
-    return { snapshots, meta, jobs };
+    return { snapshots, meta };
   }
 
   const snapshots = db.prepare("DELETE FROM snapshots").run().changes;
   const meta = db.prepare("DELETE FROM item_meta").run().changes;
-  const jobs = hasJobs ? db.prepare("DELETE FROM deep_sync_jobs").run().changes : 0;
   store.lastSync.clear();
   store.inflight.clear();
-  return { snapshots, meta, jobs };
+  return { snapshots, meta };
 }

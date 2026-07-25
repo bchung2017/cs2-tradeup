@@ -10,7 +10,7 @@ import {
   type Wear,
 } from "@/types/cs2";
 
-export function nextRarity(r: Rarity): Rarity | null {
+function nextRarity(r: Rarity): Rarity | null {
   const i = RARITY_ORDER.indexOf(r);
   if (i < 0 || i >= RARITY_ORDER.length - 2) return null; // no trade-up out of the top two tiers (Extraordinary/Contraband)
   return RARITY_ORDER[i + 1];

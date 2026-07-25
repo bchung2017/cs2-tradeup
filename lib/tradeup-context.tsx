@@ -24,7 +24,6 @@ export const makeSlots = (n: number): Slot[] =>
 // Standard contract = 10 inputs; the special Covert→knife contract = 5.
 const STANDARD_COUNT = 10;
 const KNIFE_COUNT = 5;
-export const EMPTY_SLOTS: Slot[] = makeSlots(STANDARD_COUNT);
 
 // True when a market name carries the StatTrak™ marker.
 export function isStatTrakName(name: string | null | undefined): boolean {
@@ -42,7 +41,7 @@ function isStarItem(name: string | null | undefined): boolean {
 // The ×5 "knife" contract is the special Covert→Gold trade-up: five Covert (red)
 // weapon skins roll one knife/glove. It's the only contract that isn't ×10, and
 // Covert is the only rarity that leads it.
-export function isKnifeContract(skin: Skin | null | undefined): boolean {
+function isKnifeContract(skin: Skin | null | undefined): boolean {
   return skin?.rarity.name === "Covert";
 }
 

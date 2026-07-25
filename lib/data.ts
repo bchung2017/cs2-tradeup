@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PriceEntry, PriceTable, Skin } from "@/types/cs2";
 
-const DATA_DIR = join(process.cwd(), "public", "data");
+const DATA_DIR = join(/*turbopackIgnore: true*/ process.cwd(), "public", "data");
 
 let skinCache: Skin[] | null = null;
 let skinByIdCache: Map<string, Skin> | null = null;
@@ -67,19 +67,11 @@ const WEAR_NAMES = new Set([
   "Battle-Scarred",
 ]);
 
-// Median market price for a raw inventory market name ("AK-47 | Redline
-// (Field-Tested)", "StatTrak™ …", etc.). Resolves name -> catalog skin, parses
-// the trailing "(Wear)", and reads the price table keyed by `id|wear|tag`.
-// Returns null for anything without a wear/price (cases, stickers, knives — the
-// catalog has no knives — agents, etc.).
-export function priceForMarketName(name: string | null | undefined): number | null {
-  return priceEntryForMarketName(name)?.median ?? null;
-}
-
 // Full price entry (median + per-source breakdown) for a raw inventory market
-// name. Same name->skin->`id|wear|tag` resolution as priceForMarketName, but
-// returns the whole entry so the UI can show each marketplace's price. Null for
-// anything without a priced wear.
+// name ("AK-47 | Redline (Field-Tested)", "StatTrak™ …", etc.). Resolves name ->
+// catalog skin, parses the trailing "(Wear)", and reads the price table keyed by
+// `id|wear|tag`. Returns null for anything without a priced wear (cases,
+// stickers, knives — the catalog has no knives — agents, etc.).
 export function priceEntryForMarketName(
   name: string | null | undefined,
 ): PriceEntry | null {
