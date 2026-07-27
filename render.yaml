@@ -19,3 +19,7 @@ services:
       # this credential out of git.
       - key: DATABASE_URL
         sync: false
+      # Postgres schema for this app's tables. Lets cs2-tradeup share one Supabase
+      # project with another app without their tables mixing. Not a secret.
+      - key: DB_SCHEMA
+        value: cs2

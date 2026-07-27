@@ -17,11 +17,30 @@ import type { DbSize, ItemMetaRow, SnapshotRow, SnapshotStore } from "./store";
 // parse them to numbers to match the SQLite backend's shape exactly.
 types.setTypeParser(20, (v) => (v == null ? null : Number(v)) as unknown as number);
 
-// The schema (db/schema.sql) is the single source of truth, shared with the
+// The table DDL (db/schema.sql) is the single source of truth, shared with the
 // migration script. Read at runtime (server-only) rather than inlined so the two
 // can never drift.
 function schemaSql(): string {
   return readFileSync(join(/*turbopackIgnore: true*/ process.cwd(), "db", "schema.sql"), "utf8");
+}
+
+// Target Postgres schema (namespace). Lets several apps share one database:
+// cs2-tradeup can live in its own schema (e.g. "cs2"), separate from whatever
+// else is in the project — the tables never touch each other. Defaults to
+// "public" (unchanged behavior). Validated as a bare SQL identifier so it can be
+// safely interpolated into the connection options and CREATE SCHEMA below.
+//
+// Note: this pins search_path via the libpq startup `options`, which needs a
+// session-mode connection (Supabase's Session pooler on :5432, which we already
+// require) — a transaction pooler wouldn't preserve it.
+export function pgSchema(): string {
+  const s = process.env.DB_SCHEMA ?? "public";
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(s)) {
+    throw new Error(
+      `Invalid DB_SCHEMA "${s}" — must be a bare SQL identifier ([A-Za-z_][A-Za-z0-9_]*).`,
+    );
+  }
+  return s;
 }
 
 // Supabase requires TLS. The pooler presents a cert that doesn't chain to Node's
@@ -39,14 +58,25 @@ export class PostgresSnapshotStore implements SnapshotStore {
 
   // Lazily open the pool and apply the (idempotent) schema exactly once.
   private async conn(): Promise<Pool> {
+    const schema = pgSchema();
     if (!this.pool) {
       this.pool = new Pool({
         connectionString: process.env.DATABASE_URL,
         ssl: sslConfig(),
         max: Number(process.env.PGPOOL_MAX ?? 3),
+        // Pin search_path on every pooled connection so all the (unqualified)
+        // queries below resolve into our schema — no per-query qualification and
+        // no session-state race across pooled connections.
+        options: `-c search_path=${schema}`,
       });
     }
-    if (!this.ready) this.ready = this.pool.query(schemaSql()).then(() => undefined);
+    // Create the schema, then the tables inside it (CREATE TABLE is unqualified;
+    // search_path puts it in `schema`). One batch, so it runs on one connection.
+    if (!this.ready) {
+      this.ready = this.pool
+        .query(`CREATE SCHEMA IF NOT EXISTS ${schema}; ${schemaSql()}`)
+        .then(() => undefined);
+    }
     await this.ready;
     return this.pool;
   }

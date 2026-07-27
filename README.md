@@ -36,6 +36,7 @@ See `.env.example` for a copyable list.
 | --------------- | -------------------------- | ------------------------------------------------------------------ |
 | `STEAM_API_KEY` | `resolveSteamId`           | Enables vanity-URL lookup. Without it, use a steamid64 / profile URL. |
 | `DATABASE_URL`  | `lib/store-postgres.ts`    | Set -> Postgres/Supabase cache backend; unset -> on-disk SQLite.   |
+| `DB_SCHEMA`     | `lib/store-postgres.ts`    | Postgres schema for this app's tables (default `public`).           |
 | `DATABASE_SSL`  | `lib/store-postgres.ts`    | `disable` for a local plaintext Postgres (Supabase needs TLS).     |
 | `PGPOOL_MAX`    | `lib/store-postgres.ts`    | Max Postgres pool connections (default 3).                          |
 | `ADMIN_TOKEN`   | `scripts/admin-server.ts`  | Pins the admin token (else an ephemeral one is printed at boot).   |
@@ -131,7 +132,17 @@ The schema lives in `db/schema.sql` (single source of truth, mirrors the SQLite
 tables). The Postgres backend applies it idempotently on first use, so no manual
 step is required — but you can also paste it into the Supabase SQL editor. The
 cache inspector at `/cache` shows which backend is live (`sqlite (ephemeral)` vs
-`postgres (persistent)`).
+`postgres (persistent)`) and, on Postgres, which schema.
+
+### Sharing one Supabase project (DB_SCHEMA)
+
+To reuse an existing Supabase project instead of creating a new one, set
+`DB_SCHEMA` (e.g. `cs2`). cs2-tradeup then creates and uses `snapshots` /
+`item_meta` inside that schema, isolated from anything else in the database — it
+never reads, writes, drops, or truncates tables outside its schema. The backend
+pins `search_path` on every pooled connection (via the libpq startup `options`),
+so it needs a session-mode connection — the Supabase **Session pooler** (:5432),
+which is what we require anyway. `DB_SCHEMA` unset -> `public` (unchanged).
 
 Migrate an existing `loader.db` into Postgres once:
 

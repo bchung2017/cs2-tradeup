@@ -281,6 +281,7 @@ export interface SnapshotReport {
 
 export interface CacheReport {
   backend: Backend; // which persistence layer is live: "sqlite" | "postgres"
+  schema?: string; // Postgres schema the tables live in (postgres backend only)
   db: { bytes: number; files: { name: string; bytes: number }[] };
   snapshots: SnapshotReport[];
   meta: { total: number; orphans: number; outOfRange: number };
@@ -336,6 +337,7 @@ export async function getCacheReport(): Promise<CacheReport> {
 
   return {
     backend: store.backend,
+    schema: store.backend === "postgres" ? (process.env.DB_SCHEMA ?? "public") : undefined,
     db,
     snapshots,
     meta: { total: metaIds.length, orphans, outOfRange },

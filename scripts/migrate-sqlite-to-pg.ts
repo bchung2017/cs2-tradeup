@@ -16,6 +16,7 @@ import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pool } from "pg";
+import { pgSchema } from "../lib/store-postgres";
 
 interface SnapRow {
   steamid: string;
@@ -38,15 +39,22 @@ async function main() {
     process.exit(1);
   }
 
+  const schema = pgSchema();
   const src = new Database(srcPath, { readonly: true });
   const dst = new Pool({
     connectionString: dsn,
     ssl: process.env.DATABASE_SSL === "disable" ? false : { rejectUnauthorized: false },
+    options: `-c search_path=${schema}`,
   });
 
   try {
-    // Make sure the destination schema exists (safe to run repeatedly).
-    await dst.query(readFileSync(join(process.cwd(), "db", "schema.sql"), "utf8"));
+    // Make sure the destination schema + tables exist (safe to run repeatedly).
+    // All queries below are unqualified; search_path lands them in `schema`.
+    await dst.query(
+      `CREATE SCHEMA IF NOT EXISTS ${schema}; ` +
+        readFileSync(join(process.cwd(), "db", "schema.sql"), "utf8"),
+    );
+    console.log(`target schema: ${schema}`);
 
     for (const table of ["snapshots", "item_meta"]) {
       const n = Number((await dst.query(`SELECT count(*) AS n FROM ${table}`)).rows[0].n);
