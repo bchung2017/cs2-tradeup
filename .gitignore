@@ -5,6 +5,11 @@ loader.db
 loader.db-shm
 loader.db-wal
 
+# secrets & local runtime (never commit)
+.env.local
+.env*.local
+.dev-supervisor.pid
+
 # build artifacts
 *.tsbuildinfo
 
