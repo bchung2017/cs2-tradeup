@@ -9,8 +9,57 @@
 // Import-only from Node-runtime route handlers (never Edge).
 
 import { decodeLink } from "@csfloat/cs2-inspect-serializer";
+import { fetch as undiciFetch, ProxyAgent, type Dispatcher } from "undici";
 import { getSnapshotStore } from "./store";
 import type { Backend } from "./store";
+
+// Optional outbound proxy for Steam requests. Steam throttles/blocks the
+// community inventory endpoint hard for datacenter IPs (Render, AWS, …), so a
+// deployment on such a host can 429 on the very first request — an IP-level
+// block shared by every visitor, not a per-user limit. Setting STEAM_PROXY_URL
+// (e.g. a residential proxy) routes just the Steam calls through a non-datacenter
+// IP. Unset → no-op, and requests go direct exactly as before.
+//
+// Resolved once and cached (undefined = "not yet checked", null = "no proxy").
+let proxyDispatcher: Dispatcher | null | undefined;
+function steamDispatcher(): Dispatcher | undefined {
+  if (proxyDispatcher === undefined) {
+    const url = process.env.STEAM_PROXY_URL?.trim();
+    proxyDispatcher = url ? new ProxyAgent(url) : null;
+    if (url) console.log(`[steam] routing Steam requests via proxy ${redactProxyUrl(url)}`);
+    else console.log("[steam] no STEAM_PROXY_URL set — Steam requests go direct");
+  }
+  return proxyDispatcher ?? undefined;
+}
+
+// Strip credentials from a proxy URL before logging (never log user:pass).
+function redactProxyUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return "<invalid STEAM_PROXY_URL>";
+  }
+}
+
+// fetch() for Steam endpoints — routes through the proxy dispatcher when one is
+// configured. Uses undici's fetch so the dispatcher and fetch share one undici
+// instance (mixing the global fetch with a separately-installed undici's
+// dispatcher is what triggers "invalid dispatcher" errors).
+function steamFetch(url: string, init?: Parameters<typeof undiciFetch>[1]) {
+  return undiciFetch(url, { ...init, dispatcher: steamDispatcher() });
+}
+
+// Parse a Retry-After header (delta-seconds or an HTTP date) into ms, or
+// undefined when absent/unparseable.
+function parseRetryAfter(h: string | null): number | undefined {
+  if (!h) return undefined;
+  const secs = Number(h);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const when = Date.parse(h);
+  if (!Number.isNaN(when)) return Math.max(0, when - Date.now());
+  return undefined;
+}
 
 export interface InventoryItem {
   assetid: string;
@@ -50,13 +99,26 @@ export interface Snapshot {
   count: number;
 }
 
-const FLOOR_MS = 60_000; // 60s anti-429 floor
+const FLOOR_MS = 60_000; // 60s courtesy floor between non-forced syncs
+// After Steam 429s, back off before touching it again. The block is IP-wide
+// (shared by every visitor), so this cooldown is global, not per-steamid, and
+// grows with each consecutive 429 — retrying a rate limiter immediately only
+// digs the hole deeper. A real Retry-After header, when present, wins if larger.
+const BLOCK_BASE_MS = 60_000; // first 429 → wait at least 60s
+const BLOCK_MAX_MS = 15 * 60_000; // cap the exponential backoff at 15m
+const MAX_STRIKES = 6;
+// Even a forced (user-initiated) sync keeps a small hard gap so a mashed SYNC
+// button can't fire a burst of full inventory fetches at the upstream.
+const FORCE_MIN_GAP_MS = 5_000;
 
-// In-memory sync guards (not persisted): the 60s floor timestamps and the
-// inflight set. Pinned on globalThis so dev HMR doesn't reset them.
+// In-memory sync guards (not persisted): floor timestamps, the inflight set, and
+// the shared Steam-block cooldown. Pinned on globalThis so dev HMR doesn't reset
+// them.
 interface Guards {
   lastSync: Map<string, number>; // steamid -> ms
   inflight: Set<string>;
+  blockedUntil: number; // epoch ms; Steam-throttle cooldown, shared across all steamids
+  strikes: number; // consecutive Steam 429s, drives the exponential backoff
 }
 
 declare global {
@@ -65,7 +127,12 @@ declare global {
 }
 
 function guards(): Guards {
-  return (globalThis.__steamGuards ??= { lastSync: new Map(), inflight: new Set() });
+  return (globalThis.__steamGuards ??= {
+    lastSync: new Map(),
+    inflight: new Set(),
+    blockedUntil: 0,
+    strikes: 0,
+  });
 }
 
 // Errors carry a `code` so route handlers can map them to HTTP status, exactly
@@ -107,14 +174,17 @@ export async function fetchInventory(steamid: string): Promise<InventoryItem[]> 
   // "Wear Rating" / "Pattern Template" the web inventory UI shows) in a top-level
   // `asset_properties` array — public, no auth, no inspect, no bot.
   const url = `https://steamcommunity.com/inventory/${steamid}/730/2?l=english&count=2000&preserve_bbcode=1&raw_asset_properties=1`;
-  const r = await fetch(url, {
+  const r = await steamFetch(url, {
     headers: { Referer: `https://steamcommunity.com/profiles/${steamid}/inventory` },
   });
   console.log(`[steam] GET inventory ${steamid} (raw_asset_properties=1) -> HTTP ${r.status}`);
-  if (r.status === 429) throw new SteamError("RATELIMIT", "steam 429");
+  if (r.status === 429) {
+    // Carry any Retry-After so the cooldown/backoff in syncInventory can honor it.
+    throw new SteamError("RATELIMIT", "steam 429", parseRetryAfter(r.headers.get("retry-after")));
+  }
   if (r.status === 403) throw new SteamError("PRIVATE", "inventory private");
   if (!r.ok) throw new SteamError("UPSTREAM", `http ${r.status}`);
-  const j = await r.json();
+  const j = (await r.json()) as any;
   if (!j || !j.assets) throw new SteamError("PRIVATE", "no assets returned (likely private)");
 
   const descByKey = new Map<string, any>();
@@ -209,9 +279,24 @@ export async function syncInventory(
 ): Promise<{ count: number; changed: boolean }> {
   const g = guards();
   const store = getSnapshotStore();
-  if (!opts.force) {
-    const last = g.lastSync.get(steamid) || 0;
-    const wait = FLOOR_MS - (Date.now() - last);
+  const now = Date.now();
+
+  // Shared Steam-block cooldown — applies even to forced syncs. A 429 is levied
+  // on our host IP, not on this steamid or user, so once Steam is throttling us
+  // *any* further request (forced or not) only extends the block. Short-circuit
+  // without touching Steam until the cooldown elapses.
+  if (now < g.blockedUntil) {
+    throw new SteamError("RATELIMIT", "steam is throttling our server ip", g.blockedUntil - now);
+  }
+
+  const last = g.lastSync.get(steamid) || 0;
+  if (opts.force) {
+    // Forced syncs skip the 60s courtesy floor but keep a small hard gap so a
+    // mashed button can't burst full-inventory fetches at the upstream.
+    const wait = FORCE_MIN_GAP_MS - (now - last);
+    if (wait > 0) throw new SteamError("FLOOR", "rate guard", wait);
+  } else {
+    const wait = FLOOR_MS - (now - last);
     if (wait > 0) throw new SteamError("FLOOR", "rate guard", wait);
   }
   if (g.inflight.has(steamid)) throw new SteamError("INFLIGHT", "sync in progress");
@@ -219,7 +304,10 @@ export async function syncInventory(
   g.inflight.add(steamid);
   try {
     const items = await fetchInventory(steamid);
+    // Success — clear the strike counter and any lingering cooldown.
     g.lastSync.set(steamid, Date.now());
+    g.strikes = 0;
+    g.blockedUntil = 0;
 
     const prev = await store.getSnapshot(steamid);
     const changed =
@@ -230,6 +318,20 @@ export async function syncInventory(
     const payload: SnapshotPayload = { items, count: items.length };
     await store.upsertSnapshot(steamid, Date.now(), JSON.stringify(payload));
     return { count: items.length, changed };
+  } catch (e) {
+    // On a Steam 429, arm the exponential backoff: cooldown grows with each
+    // consecutive strike (60s, 2m, 4m, …) capped at 15m, but never shorter than
+    // a Retry-After Steam gave us. Re-thrown with the effective wait so the UI
+    // can show an honest countdown.
+    if (e instanceof SteamError && e.code === "RATELIMIT") {
+      g.strikes = Math.min(g.strikes + 1, MAX_STRIKES);
+      const backoff = Math.min(BLOCK_BASE_MS * 2 ** (g.strikes - 1), BLOCK_MAX_MS);
+      const cooldown = Math.max(e.retryMs ?? 0, backoff);
+      g.blockedUntil = Date.now() + cooldown;
+      console.warn(`[steam] 429 strike ${g.strikes} — backing off ${Math.round(cooldown / 1000)}s`);
+      throw new SteamError("RATELIMIT", "steam is throttling our server ip", cooldown);
+    }
+    throw e;
   } finally {
     g.inflight.delete(steamid);
   }
@@ -382,5 +484,7 @@ export async function clearCache(steamid?: string): Promise<ClearResult> {
   const meta = await store.deleteAllMeta();
   g.lastSync.clear();
   g.inflight.clear();
+  g.blockedUntil = 0;
+  g.strikes = 0;
   return { snapshots, meta };
 }

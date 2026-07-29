@@ -175,20 +175,23 @@ export default function InventoryPanel() {
     [addFromInventory, setMsg],
   );
 
-  const loadAndRender = useCallback(async () => {
+  // Renders the persisted snapshot (no Steam call). Returns how many items were
+  // loaded so callers can tell whether a cached view is on screen (0 = none).
+  const loadAndRender = useCallback(async (): Promise<number> => {
     const id = steamidRef.current;
-    if (!id) return;
+    if (!id) return 0;
     const r = await api(`/api/inventory/${id}`);
     if (!r.ok) {
       setItems([]);
       setMeta(null);
       setSyncedAt(null);
-      return;
+      return 0;
     }
     const s = r.body as { steamid: string; count: number; items: InventoryItem[]; age_ms?: number };
     setMeta({ steamid: s.steamid, count: s.count });
     setItems(s.items);
     setSyncedAt(Date.now() - (s.age_ms ?? 0));
+    return s.items.length;
   }, []);
 
   // On mount: resolve the default profile -> steamid, then render the last
@@ -230,12 +233,27 @@ export default function InventoryPanel() {
     const r = await api(`/api/sync/${steamidRef.current}?force=1`, { method: "POST" });
     if (!r.ok) {
       const code = r.body?.code;
-      if (code === "RATELIMIT") setMsg("steam 429 // rate limited", "err");
-      else if (code === "PRIVATE") setMsg("inventory private", "err");
-      else if (code === "INFLIGHT") setMsg("sync in progress", "warn");
-      else setMsg(`sync error // ${r.body?.error || r.status}`, "err");
+      // Whatever failed, still show the last cached snapshot so the grid isn't
+      // left empty — a failed refresh shouldn't wipe the view.
+      const cachedCount = await loadAndRender();
+      const hadSnapshot = cachedCount > 0;
+      const retrySecs = Math.ceil((r.body?.retry_ms ?? 0) / 1000);
+      const inClause = retrySecs > 0 ? ` // retry in ${retrySecs}s` : "";
+      const cachedClause = hadSnapshot ? " // showing cached items" : "";
+      if (code === "RATELIMIT") {
+        // Not the user's limit: Steam throttles our shared server IP (all
+        // visitors share it), independent of how recently you opened the app.
+        setMsg(`steam is throttling our server ip${inClause}${cachedClause}`, "warn");
+      } else if (code === "FLOOR") {
+        setMsg(`syncing too fast${inClause}`, "warn");
+      } else if (code === "PRIVATE") {
+        setMsg("inventory private", "err");
+      } else if (code === "INFLIGHT") {
+        setMsg("sync in progress", "warn");
+      } else {
+        setMsg(`sync error // ${r.body?.error || r.status}`, "err");
+      }
       setSyncing(false);
-      await loadAndRender();
       return;
     }
     setMsg(`${r.body.count} items // ${r.body.changed ? "updated" : "unchanged"}`, "ok");
