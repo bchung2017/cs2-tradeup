@@ -106,6 +106,14 @@ html, body {
 }
 .pane--console { padding: 40px 24px 20px; }
 .pane--inventory { padding: 10px 24px 60px; }
+
+/* Full-screen inventory view — wider than a panel so the fluid grid gets more
+   columns. */
+.inventory-full {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
 /* Opaque card that holds each panel's controls. */
 .pane-card { padding: 22px 22px 24px; }
 .pane-card--inventory { padding: 16px 22px 18px; }
