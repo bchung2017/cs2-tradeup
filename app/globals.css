@@ -54,6 +54,89 @@ html, body {
   font-family: var(--mono);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
+  /* never let a stray wide child scroll the whole page sideways on mobile */
+  overflow-x: hidden;
+}
+
+/* ── responsive shell ──────────────────────────────────────────────────────
+   Desktop: the trade-up console (left) and the inventory (right) sit as two
+   equal columns, the inventory column sticky/independently scrolled. Below the
+   breakpoint the two sides stack into horizontal rows (console on top,
+   inventory below) and the inventory column drops its sticky/full-height
+   behavior so it scrolls with the page. */
+.app-shell {
+  display: flex;
+  align-items: flex-start;
+}
+.app-shell > .app-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.app-shell > .app-col--inv {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  border-left: 1px solid var(--surface-line);
+}
+@media (max-width: 860px) {
+  .app-shell { flex-direction: column; }
+  .app-shell > .app-col { width: 100%; }
+  .app-shell > .app-col--inv {
+    position: static;
+    height: auto;
+    overflow-y: visible;
+    border-left: none;
+    border-top: 1px solid var(--surface-line);
+  }
+}
+
+/* Panel <main> wrappers — reclaim horizontal padding on phones so the inner
+   tiles get more room. */
+.pane {
+  max-width: 980px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 1;
+}
+.pane--console { padding: 40px 24px 20px; }
+.pane--inventory { padding: 10px 24px 60px; }
+/* Opaque card that holds each panel's controls. */
+.pane-card { padding: 22px 22px 24px; }
+.pane-card--inventory { padding: 16px 22px 18px; }
+
+/* Tile grids — column counts readjust per breakpoint so nothing is squeezed. */
+.slot-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.outcome-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+/* Outcome-distribution donut + breakdown: side-by-side on desktop, stacked on
+   phones so the breakdown table isn't crushed next to the 200px donut. */
+@media (max-width: 600px) {
+  .viz-row { flex-direction: column; gap: 16px; }
+  .viz-row > .viz-donut { align-self: center; }
+}
+
+@media (max-width: 600px) {
+  .pane--console { padding: 24px 12px 16px; }
+  .pane--inventory { padding: 8px 12px 48px; }
+  .pane-card { padding: 16px 14px 18px; }
+  .pane-card--inventory { padding: 14px 14px 16px; }
+  .slot-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .outcome-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+  .inventory-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 }
 
 body {

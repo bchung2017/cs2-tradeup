@@ -331,22 +331,14 @@ export default function InventoryPanel() {
 
   return (
     <>
-      <main
-        style={{
-          maxWidth: 980,
-          margin: "0 auto",
-          padding: "10px 24px 60px",
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
+      <main className="pane pane--inventory">
         <div
+          className="pane-card pane-card--inventory"
           style={{
             position: "relative",
             overflow: "hidden",
             background: "var(--surface)",
             border: "1px solid var(--surface-line)",
-            padding: "16px 22px 18px",
             boxShadow: "0 0 0 1px rgba(0,0,0,0.6), 0 8px 40px rgba(0,0,0,0.7)",
           }}
         >
@@ -532,14 +524,7 @@ export default function InventoryPanel() {
 
         {/* item grid */}
         {!busy && items && items.length > 0 && (
-          <div
-            style={{
-              marginTop: 12,
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
-              gap: 10,
-            }}
-          >
+          <div className="inventory-grid" style={{ marginTop: 12 }}>
             {filtered.map((it) => {
               const elig = inventoryInputEligibility(it);
               const ineligible = !elig.eligible;

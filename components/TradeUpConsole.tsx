@@ -97,20 +97,12 @@ export default function TradeUpConsole() {
   return (
     <>
       <CircuitBoard intensity={filled / count} surge={running} />
-      <main
-        style={{
-          maxWidth: 980,
-          margin: "0 auto",
-          padding: "40px 24px 20px",
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
+      <main className="pane pane--console">
       <div
+        className="pane-card"
         style={{
           background: "var(--surface)",
           border: "1px solid var(--surface-line)",
-          padding: "22px 22px 24px",
           boxShadow: "0 0 0 1px rgba(0,0,0,0.6), 0 8px 40px rgba(0,0,0,0.7)",
         }}
       >
@@ -161,15 +153,8 @@ export default function TradeUpConsole() {
         </span>
       </div>
 
-      {/* slot grid */}
-      <div
-        style={{
-          marginTop: 16,
-          display: "grid",
-          gridTemplateColumns: "repeat(5, 1fr)",
-          gap: 8,
-        }}
-      >
+      {/* slot grid — 5 columns on desktop, 3 on phones (see .slot-grid) */}
+      <div className="slot-grid" style={{ marginTop: 16 }}>
         {slots.map((slot, i) => (
           <div
             key={i}
@@ -582,14 +567,7 @@ function Outcomes({
 
       {/* Outcome grid — one card per possible item, ordered most→least likely.
           The swatch on each card matches that item's donut slice above. */}
-      <div
-        style={{
-          marginTop: 8,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-          gap: 10,
-        }}
-      >
+      <div className="outcome-grid" style={{ marginTop: 8 }}>
         {order.map((idx) => {
           const o = result.outcomes[idx];
           // idx is the ORIGINAL index — keeps color/ref/selection aligned with
@@ -991,13 +969,16 @@ function ResultViz({
     >
       <div className="hud" style={{ marginBottom: 12 }}>OUTCOME DISTRIBUTION</div>
       {/* Donut adjacent to the breakdown dropdown. The flex row is positioned so
-          the rows + list measure their offsets against it for the lerp. */}
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start", position: "relative" }}>
+          the rows + list measure their offsets against it for the lerp. On phones
+          (.viz-row media query) it stacks: donut on top, breakdown below. */}
+      <div className="viz-row" style={{ display: "flex", gap: 24, alignItems: "flex-start", position: "relative" }}>
         {/* donut — detaches and lerps down toward the focused row as you scan */}
         <div
+          className="viz-donut"
           style={{
             flexShrink: 0,
             width: DONUT,
+            maxWidth: "100%",
             transform: `translateY(${donutShift}px)`,
             transition: "transform 0.3s cubic-bezier(0.22, 1, 0.36, 1)",
             willChange: "transform",
