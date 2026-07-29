@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { TradeupProvider } from "@/lib/tradeup-context";
+import TopRail from "@/components/TopRail";
 
 export const metadata: Metadata = {
   title: "CS2 Journeyman · Trade-Up Console",
@@ -17,7 +19,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {/* Provider hoisted to the root layout so contract state survives route
+            changes (page.tsx remounts on navigation; layout.tsx persists). The
+            rail lives here too, above every surface. */}
+        <TradeupProvider>
+          <TopRail />
+          {children}
+        </TradeupProvider>
+      </body>
     </html>
   );
 }

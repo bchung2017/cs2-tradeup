@@ -33,6 +33,10 @@
 
   --mono: "JetBrains Mono", "Cascadia Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
+  /* persistent top nav rail height — shared by the rail and any full-height
+     surface (e.g. the console's sticky inventory column) so they don't overlap */
+  --rail-h: 34px;
+
   /* back-compat aliases (old names -> accessible palette) */
   --ember: var(--green);            /* accent stays green */
   --ember-2: var(--green-dim);
