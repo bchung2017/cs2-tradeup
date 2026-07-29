@@ -65,6 +65,7 @@ export default function TopRail() {
 
       <div style={{ display: "flex", gap: 16 }}>
         <SurfaceLink href="/" label="CONSOLE" active={pathname === "/"} />
+        <SurfaceLink href="/inventory" label="INVENTORY" active={pathname === "/inventory"} />
       </div>
 
       <Link
