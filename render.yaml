@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: cs2-tradeup
+    runtime: node
+    # No persistent disk: the inventory cache lives in Supabase Postgres when
+    # DATABASE_URL is set (below). Without it the app falls back to on-disk
+    # SQLite, which is fine but resets on each deploy/restart on the free tier.
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    envVars:
+      # Optional: enables Steam vanity-URL resolution (steamid64 / profile URL
+      # work without it). sync:false keeps it out of git — paste in the dashboard.
+      - key: STEAM_API_KEY
+        sync: false
+      # Supabase *Session pooler* URI (port 5432 on *.pooler.supabase.com — the
+      # IPv4-compatible host; Render has no IPv6 egress). Persists the inventory
+      # cache across deploys. Unset -> ephemeral on-disk SQLite. sync:false keeps
+      # this credential out of git.
+      - key: DATABASE_URL
+        sync: false
+      # Postgres schema for this app's tables. Lets cs2-tradeup share one Supabase
+      # project with another app without their tables mixing. Not a secret.
+      - key: DB_SCHEMA
+        value: cs2

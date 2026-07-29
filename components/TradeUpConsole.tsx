@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import CircuitBoard from "@/components/CircuitBoard";
 import SkinPicker from "@/components/SkinPicker";
-import PriceModal, { marketName, wearFromFloat } from "@/components/PriceModal";
+import PriceModal, { marketName } from "@/components/PriceModal";
 import { oddsString, rarityColor, rarityHex, signedUsd, usd } from "@/lib/display";
+import { numCompare } from "@/lib/util";
+import { floatToWear } from "@/lib/tradeup";
 import { makeSlots, useTradeup } from "@/lib/tradeup-context";
 import type { Rarity, Skin, TradeupOutcome, TradeupResult } from "@/types/cs2";
 
@@ -265,7 +267,7 @@ export default function TradeUpConsole() {
                         name: marketName({
                           weapon: slot.skin!.weapon.name,
                           skin: slot.skin!.name,
-                          wear: wearFromFloat(slot.float),
+                          wear: floatToWear(slot.float),
                           stattrak: slot.stattrak,
                         }),
                         image: slot.skin!.image,
@@ -426,15 +428,6 @@ const WEAPON_BUY_PRICE: Record<string, number> = {
   "SSG 08": 1700, AWP: 4750, "SCAR-20": 5000, G3SG1: 5000,
 };
 
-// Numeric compare with a fixed direction; null prices sink last either way
-// (same rule the inventory grid uses for unpriced items).
-function cmpNum(a: number | null | undefined, b: number | null | undefined, dir: 1 | -1): number {
-  if (a == null && b == null) return 0;
-  if (a == null) return 1;
-  if (b == null) return -1;
-  return (a - b) * dir;
-}
-
 // Display order of indices into `outcomes`. Probability breaks price ties so
 // equal-priced items keep a stable, meaningful order.
 function sortedOutcomeOrder(outcomes: TradeupOutcome[], key: OutcomeSortKey): number[] {
@@ -450,13 +443,13 @@ function sortedOutcomeOrder(outcomes: TradeupOutcome[], key: OutcomeSortKey): nu
       case "likelihood-asc":
         return prob(a) - prob(b);
       case "price-desc":
-        return cmpNum(price(a), price(b), -1) || prob(b) - prob(a);
+        return numCompare(price(a), price(b), -1) || prob(b) - prob(a);
       case "price-asc":
-        return cmpNum(price(a), price(b), 1) || prob(b) - prob(a);
+        return numCompare(price(a), price(b), 1) || prob(b) - prob(a);
       case "ingame-desc":
-        return cmpNum(ingame(a), ingame(b), -1) || prob(b) - prob(a);
+        return numCompare(ingame(a), ingame(b), -1) || prob(b) - prob(a);
       case "ingame-asc":
-        return cmpNum(ingame(a), ingame(b), 1) || prob(b) - prob(a);
+        return numCompare(ingame(a), ingame(b), 1) || prob(b) - prob(a);
       default: // likelihood-desc — the canonical most-likely-first order
         return prob(b) - prob(a);
     }

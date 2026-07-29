@@ -1,20 +1,16 @@
 // Server-side Steam inventory loader, ported from the standalone loader.mjs.
 //
-// The loader used node:sqlite (DatabaseSync) — a Node 22.5+ built-in that does
-// not exist on this app's Node 20 runtime. SQLite itself is fine on Node 20; we
-// just reach it through the better-sqlite3 npm package instead, which exposes
-// the same synchronous .exec/.prepare/.run/.get API the loader was written for.
-// Behavior is preserved 1:1: a write-through snapshot per steamid (on disk in
-// loader.db), a 60s anti-429 floor, and an inflight guard.
+// Persistence lives behind lib/store.ts: a write-through snapshot per steamid,
+// backed by on-disk SQLite (loader.db) by default, or Supabase/Postgres when
+// DATABASE_URL is set (so the cache survives an ephemeral filesystem). This
+// module owns only the Steam fetch/decode and the in-memory 60s anti-429 floor +
+// inflight guard, which are pinned on globalThis so dev HMR doesn't reset them.
 //
-// Native addon + Next.js: this module is import-only from Node-runtime route
-// handlers (never Edge), and the DB handle + in-memory guards are pinned on
-// globalThis so dev HMR doesn't open the database twice.
+// Import-only from Node-runtime route handlers (never Edge).
 
-import Database from "better-sqlite3";
 import { decodeLink } from "@csfloat/cs2-inspect-serializer";
-import { statSync } from "node:fs";
-import { join } from "node:path";
+import { getSnapshotStore } from "./store";
+import type { Backend } from "./store";
 
 export interface InventoryItem {
   assetid: string;
@@ -35,7 +31,7 @@ export interface InventoryItem {
   paint_index?: number | null;
   meta_fetched_at?: number | null;
   // Median market price, resolved at read time from the price table by market
-  // name + wear (see priceForMarketName). Null for items with no priced wear.
+  // name + wear (see priceEntryForMarketName). Null for items with no priced wear.
   price?: number | null;
   // Per-marketplace prices that fed the median (e.g. { steam, skinport }),
   // attached alongside `price` so the inventory card's price modal can show
@@ -54,63 +50,22 @@ export interface Snapshot {
   count: number;
 }
 
-export const FLOOR_MS = 60_000; // 60s anti-429 floor
+const FLOOR_MS = 60_000; // 60s anti-429 floor
 
-// Per-item metadata that never changes for a given assetid (float / paint).
-export interface ItemMeta {
-  float: number | null;
-  paint_seed: number | null;
-  paint_index: number | null;
-  fetched_at: number;
-}
-
-interface SteamStore {
-  db: Database.Database;
-  upsertSnap: Database.Statement;
-  getSnap: Database.Statement;
+// In-memory sync guards (not persisted): the 60s floor timestamps and the
+// inflight set. Pinned on globalThis so dev HMR doesn't reset them.
+interface Guards {
   lastSync: Map<string, number>; // steamid -> ms
   inflight: Set<string>;
 }
 
 declare global {
   // eslint-disable-next-line no-var
-  var __steamStore: SteamStore | undefined;
+  var __steamGuards: Guards | undefined;
 }
 
-function initStore(): SteamStore {
-  const db = new Database(join(process.cwd(), "loader.db"));
-  db.exec(`PRAGMA journal_mode=WAL;
-    CREATE TABLE IF NOT EXISTS snapshots (
-      steamid TEXT PRIMARY KEY,
-      fetched_at INTEGER NOT NULL,
-      payload TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS item_meta (
-      assetid TEXT PRIMARY KEY,
-      float REAL,
-      paint_seed INTEGER,
-      paint_index INTEGER,
-      fetched_at INTEGER NOT NULL
-    );
-    -- The standalone deep-sync float resolver is gone: floats are now decoded
-    -- locally at sync time. Drop the obsolete job table (and any stale rows).
-    DROP TABLE IF EXISTS deep_sync_jobs;`);
-  return {
-    db,
-    upsertSnap: db.prepare(
-      "INSERT INTO snapshots(steamid,fetched_at,payload) VALUES(?,?,?) ON CONFLICT(steamid) DO UPDATE SET fetched_at=excluded.fetched_at, payload=excluded.payload",
-    ),
-    getSnap: db.prepare("SELECT fetched_at, payload FROM snapshots WHERE steamid=?"),
-    lastSync: new Map(),
-    inflight: new Set(),
-  };
-}
-
-// Lazy: the DB is opened on first actual request, never at import time. This
-// keeps `next build` (which imports route modules across many parallel workers
-// just to collect page data) from racing to open loader.db in WAL mode.
-function getStore(): SteamStore {
-  return globalThis.__steamStore ?? (globalThis.__steamStore = initStore());
+function guards(): Guards {
+  return (globalThis.__steamGuards ??= { lastSync: new Map(), inflight: new Set() });
 }
 
 // Errors carry a `code` so route handlers can map them to HTTP status, exactly
@@ -252,73 +207,45 @@ export async function syncInventory(
   steamid: string,
   opts: { force?: boolean } = {},
 ): Promise<{ count: number; changed: boolean }> {
-  const store = getStore();
+  const g = guards();
+  const store = getSnapshotStore();
   if (!opts.force) {
-    const last = store.lastSync.get(steamid) || 0;
+    const last = g.lastSync.get(steamid) || 0;
     const wait = FLOOR_MS - (Date.now() - last);
     if (wait > 0) throw new SteamError("FLOOR", "rate guard", wait);
   }
-  if (store.inflight.has(steamid)) throw new SteamError("INFLIGHT", "sync in progress");
+  if (g.inflight.has(steamid)) throw new SteamError("INFLIGHT", "sync in progress");
 
-  store.inflight.add(steamid);
+  g.inflight.add(steamid);
   try {
     const items = await fetchInventory(steamid);
-    store.lastSync.set(steamid, Date.now());
+    g.lastSync.set(steamid, Date.now());
 
-    const prevRow = store.getSnap.get(steamid) as { payload: string } | undefined;
+    const prev = await store.getSnapshot(steamid);
     const changed =
-      !prevRow ||
-      JSON.stringify((JSON.parse(prevRow.payload) as SnapshotPayload).items.map((i) => i.assetid).sort()) !==
+      !prev ||
+      JSON.stringify((JSON.parse(prev.payload) as SnapshotPayload).items.map((i) => i.assetid).sort()) !==
         JSON.stringify(items.map((i) => i.assetid).sort());
 
     const payload: SnapshotPayload = { items, count: items.length };
-    store.upsertSnap.run(steamid, Date.now(), JSON.stringify(payload));
+    await store.upsertSnapshot(steamid, Date.now(), JSON.stringify(payload));
     return { count: items.length, changed };
   } finally {
-    store.inflight.delete(steamid);
+    g.inflight.delete(steamid);
   }
 }
 
-// Fetch item_meta rows for a set of assetids, keyed by assetid. The IN-clause
-// size varies per call, so the statement is built per call rather than pinned.
-function getMetaForAssets(store: SteamStore, assetids: string[]): Map<string, ItemMeta> {
-  const byId = new Map<string, ItemMeta>();
-  if (assetids.length === 0) return byId;
-  const rows = store.db
-    .prepare(
-      `SELECT assetid, float, paint_seed, paint_index, fetched_at FROM item_meta WHERE assetid IN (${assetids.map(() => "?").join(",")})`,
-    )
-    .all(...assetids) as Array<{
-    assetid: string;
-    float: number | null;
-    paint_seed: number | null;
-    paint_index: number | null;
-    fetched_at: number;
-  }>;
-  for (const r of rows) {
-    byId.set(r.assetid, {
-      float: r.float,
-      paint_seed: r.paint_seed,
-      paint_index: r.paint_index,
-      fetched_at: r.fetched_at,
-    });
-  }
-  return byId;
-}
-
-export function getSnapshot(steamid: string): Snapshot | undefined {
-  const store = getStore();
-  const row = store.getSnap.get(steamid) as { fetched_at: number; payload: string } | undefined;
+export async function getSnapshot(steamid: string): Promise<Snapshot | undefined> {
+  const store = getSnapshotStore();
+  const row = await store.getSnapshot(steamid);
   if (!row) return undefined;
   const payload = JSON.parse(row.payload) as SnapshotPayload;
 
   // Legacy fill: older snapshots resolved floats into the separate item_meta
   // table. Floats are now decoded into the payload at sync time, so the payload
   // value wins; item_meta only backfills assets a fresh sync hasn't covered yet.
-  const byId = getMetaForAssets(
-    store,
-    payload.items.map((i) => i.assetid),
-  );
+  const metaRows = await store.getMeta(payload.items.map((i) => i.assetid));
+  const byId = new Map(metaRows.map((m) => [m.assetid, m]));
   const items = payload.items.map((i) => {
     const m = byId.get(i.assetid);
     if (!m) return i;
@@ -335,7 +262,7 @@ export function getSnapshot(steamid: string): Snapshot | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Cache inspector — read-only integrity report over loader.db.
+// Cache inspector — read-only integrity report over the snapshot store.
 // ---------------------------------------------------------------------------
 
 type Health = "ok" | "warn" | "corrupt";
@@ -352,34 +279,23 @@ export interface SnapshotReport {
   health: Health;
 }
 
-export interface JobReport {
-  steamid: string;
-  status: string;
-  total: number;
-  done: number;
-  error: string | null;
-  started_at: number;
-  updated_at: number;
-  health: Health;
-}
-
 export interface CacheReport {
+  backend: Backend; // which persistence layer is live: "sqlite" | "postgres"
+  schema?: string; // Postgres schema the tables live in (postgres backend only)
   db: { bytes: number; files: { name: string; bytes: number }[] };
   snapshots: SnapshotReport[];
   meta: { total: number; orphans: number; outOfRange: number };
-  jobs: JobReport[];
 }
 
-const JOB_STALE_MS = 30_000;
+export async function getCacheReport(): Promise<CacheReport> {
+  const store = getSnapshotStore();
 
-export function getCacheReport(): CacheReport {
-  const store = getStore();
-  const db = store.db;
+  // item_meta assetids up front: drives both per-snapshot `covered` and the
+  // orphan count, in memory, so neither backend does per-snapshot queries.
+  const metaIds = await store.allMetaAssetIds();
+  const metaSet = new Set(metaIds);
 
-  const snapRows = db
-    .prepare("SELECT steamid, fetched_at, length(payload) AS bytes, payload FROM snapshots")
-    .all() as Array<{ steamid: string; fetched_at: number; bytes: number; payload: string }>;
-
+  const snapRows = await store.allSnapshots();
   const allAssetIds = new Set<string>();
   const snapshots: SnapshotReport[] = [];
   for (const r of snapRows) {
@@ -396,25 +312,15 @@ export function getCacheReport(): CacheReport {
       inspectable = p.items.filter((i) => i.inspect_url).length;
       assetids = p.items.map((i) => i.assetid);
       for (const id of assetids) allAssetIds.add(id);
+      covered = assetids.reduce((n, id) => n + (metaSet.has(id) ? 1 : 0), 0);
     } catch {
       parseOk = false;
-    }
-    if (parseOk) {
-      covered = assetids.length
-        ? (
-            db
-              .prepare(
-                `SELECT count(*) AS c FROM item_meta WHERE assetid IN (${assetids.map(() => "?").join(",")})`,
-              )
-              .get(...assetids) as { c: number }
-          ).c
-        : 0;
     }
     const health: Health = !parseOk ? "corrupt" : storedCount !== actualCount ? "warn" : "ok";
     snapshots.push({
       steamid: r.steamid,
       fetchedAt: r.fetched_at,
-      bytes: r.bytes,
+      bytes: Buffer.byteLength(r.payload, "utf8"),
       parseOk,
       storedCount,
       actualCount,
@@ -424,96 +330,57 @@ export function getCacheReport(): CacheReport {
     });
   }
 
-  const metaTotal = (db.prepare("SELECT count(*) AS c FROM item_meta").get() as { c: number }).c;
-  const outOfRange = (
-    db
-      .prepare("SELECT count(*) AS c FROM item_meta WHERE float IS NOT NULL AND (float < 0 OR float > 1)")
-      .get() as { c: number }
-  ).c;
-  const metaIds = db.prepare("SELECT assetid FROM item_meta").all() as Array<{ assetid: string }>;
   let orphans = 0;
-  for (const m of metaIds) if (!allAssetIds.has(m.assetid)) orphans++;
+  for (const id of metaIds) if (!allAssetIds.has(id)) orphans++;
+  const outOfRange = await store.metaOutOfRange();
+  const db = await store.size();
 
-  // deep_sync_jobs is created in a later phase; tolerate its absence.
-  let jobs: JobReport[] = [];
-  const hasJobs = db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='deep_sync_jobs'")
-    .get();
-  if (hasJobs) {
-    const jr = db
-      .prepare("SELECT steamid, status, total, done, error, started_at, updated_at FROM deep_sync_jobs")
-      .all() as Array<Omit<JobReport, "health">>;
-    jobs = jr.map((j) => {
-      const health: Health =
-        j.done > j.total
-          ? "corrupt"
-          : j.status === "paused" || (j.status === "running" && Date.now() - j.updated_at > JOB_STALE_MS)
-            ? "warn"
-            : "ok";
-      return { ...j, health };
-    });
-  }
-
-  const files = ["loader.db", "loader.db-wal", "loader.db-shm"].map((name) => {
-    try {
-      return { name, bytes: statSync(join(process.cwd(), name)).size };
-    } catch {
-      return { name, bytes: 0 };
-    }
-  });
-  const bytes = files.reduce((a, f) => a + f.bytes, 0);
-
-  return { db: { bytes, files }, snapshots, meta: { total: metaTotal, orphans, outOfRange }, jobs };
+  return {
+    backend: store.backend,
+    schema: store.backend === "postgres" ? (process.env.DB_SCHEMA ?? "public") : undefined,
+    db,
+    snapshots,
+    meta: { total: metaIds.length, orphans, outOfRange },
+  };
 }
 
-export interface ClearResult {
+interface ClearResult {
   snapshots: number;
   meta: number;
-  jobs: number;
 }
 
 /**
  * Force-clears the persistent cache. With a `steamid`, clears only that
  * profile's snapshot and any legacy per-item float/paint meta; with no argument,
- * wipes everything. Also resets the in-memory sync guards so
- * a fresh sync right after a clear isn't blocked by the 60s floor or a stale
- * inflight flag. The loader.db file itself is kept (rows are deleted, not the DB).
+ * wipes everything. Also resets the in-memory sync guards so a fresh sync right
+ * after a clear isn't blocked by the 60s floor or a stale inflight flag. The
+ * database itself is kept (rows are deleted, not the store).
  */
-export function clearCache(steamid?: string): ClearResult {
-  const store = getStore();
-  const db = store.db;
-  const hasJobs = !!db
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='deep_sync_jobs'")
-    .get();
+export async function clearCache(steamid?: string): Promise<ClearResult> {
+  const store = getSnapshotStore();
+  const g = guards();
 
   if (steamid) {
     // item_meta is keyed by assetid, so scope its delete to this snapshot's assets.
     let meta = 0;
-    const row = store.getSnap.get(steamid) as { payload: string } | undefined;
+    const row = await store.getSnapshot(steamid);
     if (row) {
       try {
         const ids = (JSON.parse(row.payload) as SnapshotPayload).items.map((i) => i.assetid);
-        for (let i = 0; i < ids.length; i += 500) {
-          const chunk = ids.slice(i, i + 500);
-          meta += db
-            .prepare(`DELETE FROM item_meta WHERE assetid IN (${chunk.map(() => "?").join(",")})`)
-            .run(...chunk).changes;
-        }
+        meta = await store.deleteMetaForAssets(ids);
       } catch {
         // corrupt payload — drop the snapshot row anyway, leave meta untouched
       }
     }
-    const snapshots = db.prepare("DELETE FROM snapshots WHERE steamid=?").run(steamid).changes;
-    const jobs = hasJobs ? db.prepare("DELETE FROM deep_sync_jobs WHERE steamid=?").run(steamid).changes : 0;
-    store.lastSync.delete(steamid);
-    store.inflight.delete(steamid);
-    return { snapshots, meta, jobs };
+    const snapshots = await store.deleteSnapshot(steamid);
+    g.lastSync.delete(steamid);
+    g.inflight.delete(steamid);
+    return { snapshots, meta };
   }
 
-  const snapshots = db.prepare("DELETE FROM snapshots").run().changes;
-  const meta = db.prepare("DELETE FROM item_meta").run().changes;
-  const jobs = hasJobs ? db.prepare("DELETE FROM deep_sync_jobs").run().changes : 0;
-  store.lastSync.clear();
-  store.inflight.clear();
-  return { snapshots, meta, jobs };
+  const snapshots = await store.deleteAllSnapshots();
+  const meta = await store.deleteAllMeta();
+  g.lastSync.clear();
+  g.inflight.clear();
+  return { snapshots, meta };
 }

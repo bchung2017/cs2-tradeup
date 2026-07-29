@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { CacheReport, JobReport, SnapshotReport } from "@/lib/steam";
+import type { CacheReport, SnapshotReport } from "@/lib/steam";
 
 const DOT: Record<string, string> = {
   ok: "var(--profit)",
@@ -156,7 +156,11 @@ export default function CacheInspector() {
 
       {report && (
         <div className="hud" style={{ marginTop: 12 }}>
-          loader.db // {bytes(report.db.bytes)} //{" "}
+          <span style={{ color: report.backend === "postgres" ? "var(--profit)" : "var(--amber)" }}>
+            {report.backend === "postgres" ? "postgres (persistent)" : "sqlite (ephemeral)"}
+          </span>
+          {report.schema && <span> · schema {report.schema}</span>}{" "}
+          // {bytes(report.db.bytes)} //{" "}
           {report.db.files.map((f) => `${f.name.replace("loader.db", "db")}:${bytes(f.bytes)}`).join("  ")}
         </div>
       )}
@@ -237,39 +241,6 @@ export default function CacheInspector() {
                 warn={report.meta.outOfRange > 0}
               />
             </div>
-          </Section>
-
-          <Section title="DEEP SYNC JOBS">
-            {report.jobs.length === 0 ? (
-              <Empty>no jobs (deep sync not run yet)</Empty>
-            ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr className="hud">
-                    <th style={th}></th>
-                    <th style={th}>STEAMID</th>
-                    <th style={th}>STATUS</th>
-                    <th style={th}>PROGRESS</th>
-                    <th style={th}>HEARTBEAT</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.jobs.map((j: JobReport) => (
-                    <tr key={j.steamid}>
-                      <td style={td}>
-                        <Dot health={j.health} />
-                      </td>
-                      <td style={td}>{j.steamid}</td>
-                      <td style={td}>{j.status}</td>
-                      <td style={td}>
-                        {j.done} / {j.total}
-                      </td>
-                      <td style={td}>{age(j.updated_at)} ago</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
           </Section>
         </>
       )}

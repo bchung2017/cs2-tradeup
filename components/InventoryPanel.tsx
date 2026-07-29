@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTradeup, isStatTrakName, inventoryInputEligibility } from "@/lib/tradeup-context";
 import { rarityHex, usd } from "@/lib/display";
+import { lerp, numCompare } from "@/lib/util";
 import PriceModal from "@/components/PriceModal";
 import type { InventoryItem } from "@/lib/steam";
 
@@ -47,16 +48,6 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "float-desc", label: "Float: high → low" },
   { key: "float-asc", label: "Float: low → high" },
 ];
-
-// Numeric compare with a fixed direction; null/undefined always sink last
-// regardless of direction (an unpriced / floatless / unranked item has no
-// meaningful position in the ordering, so it trails either way).
-function numCompare(a: number | null | undefined, b: number | null | undefined, dir: 1 | -1): number {
-  if (a == null && b == null) return 0;
-  if (a == null) return 1;
-  if (b == null) return -1;
-  return (a - b) * dir;
-}
 
 function sortComparator(key: SortKey): (a: InventoryItem, b: InventoryItem) => number {
   switch (key) {
@@ -823,8 +814,6 @@ function ProfilePic() {
     </div>
   );
 }
-
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /**
  * Phosphor progress fill pinned to the top edge of the header. While `active`,

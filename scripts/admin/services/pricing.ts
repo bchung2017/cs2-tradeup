@@ -34,7 +34,7 @@ const MAX_BACKOFF_MS = 60_000;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-export interface MarketAvgOptions {
+interface MarketAvgOptions {
   providers: BulkProvider[]; // feeds to average (default all)
   tag?: string;
   wear?: string;
@@ -42,7 +42,7 @@ export interface MarketAvgOptions {
   dryRun: boolean;
 }
 
-export interface SteamDirectOptions {
+interface SteamDirectOptions {
   limit?: number; // cap items this run; undefined = ALL pending
   delayMs: number;
   tag?: string;

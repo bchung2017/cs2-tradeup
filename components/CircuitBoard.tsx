@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { lerp } from "@/lib/util";
 
 interface Props {
   /** 0..1 — ambient activity level (e.g. filled slots / 10). */
@@ -32,10 +33,6 @@ type Pulse = {
 };
 
 const GREEN = { r: 51, g: 255, b: 51 };
-
-function lerp(a: number, b: number, t: number) {
-  return a + (b - a) * t;
-}
 
 /** Walk a polyline to find the point at arc-length fraction t (0..1). */
 function pointAt(trace: Trace, t: number): Pt {

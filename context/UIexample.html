@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Journeyman — Route</title>
+<style>
+:root {
+  --void: #000000;
+  --surface: #0a120a;
+  --surface-2: #0f1a0f;
+  --surface-line: #1f4d1f;
+
+  --green: #33ff33;
+  --green-dim: #19a019;
+  --green-faint: #0d600d;
+  --green-hot: #aaffaa;
+
+  --fg: #e3ebe3;
+  --fg-dim: #9aa89a;
+  --fg-faint: #6a766a;
+
+  --amber: #ffc233;
+  --loss: #ff6b5a;
+  --profit: #5cff5c;
+
+  /* CS2 rarity — instantly parsed by the audience */
+  --r-purple: #8847ff;   /* Restricted */
+  --r-pink:   #d32ce6;   /* Classified */
+  --r-red:    #eb4b4b;   /* Covert */
+
+  --mono: "JetBrains Mono", "Cascadia Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--void);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-image:
+    repeating-linear-gradient(0deg,
+      rgba(51,255,51,0.03) 0px, rgba(51,255,51,0.03) 1px,
+      transparent 1px, transparent 3px),
+    radial-gradient(circle at 50% 0%, rgba(51,255,51,0.05), transparent 60%);
+  min-height: 100vh;
+}
+
+.hud {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+.glow { text-shadow: 0 0 4px rgba(51,255,51,0.55); }
+
+/* ---------- header strip: the 400ms financials ---------- */
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--surface-line);
+}
+header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--green);
+}
+header h1 .prompt { color: var(--green-dim); font-weight: 400; }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat .v { font-size: 20px; font-weight: 700; }
+.stat .v.buyin { color: var(--amber); }
+.stat .v.net-pos { color: var(--profit); }
+.stat .v.net-neg { color: var(--loss); }
+.stat .sub { font-size: 10px; color: var(--fg-faint); }
+
+/* ---------- route rail ---------- */
+.route {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 40px 24px 56px;
+  overflow-x: auto;
+}
+
+/* node card */
+.node {
+  position: relative;
+  flex: 0 0 232px;
+  background: var(--surface);
+  border: 1px solid var(--surface-line);
+  border-top: 3px solid var(--surface-line);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.node.rar-purple { border-top-color: var(--r-purple); }
+.node.rar-pink   { border-top-color: var(--r-pink); }
+.node.rar-red    { border-top-color: var(--r-red); }
+
+.node .rank { display: flex; justify-content: space-between; align-items: baseline; }
+.node .rank .tier { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; }
+.rar-purple .rank .tier { color: var(--r-purple); }
+.rar-pink   .rank .tier { color: var(--r-pink); }
+.rar-red    .rank .tier { color: var(--r-red); }
+
+/* the money number — biggest thing on the card */
+.delta { font-size: 24px; font-weight: 700; line-height: 1; }
+.delta.pos { color: var(--profit); }
+.delta.neg { color: var(--loss); }
+.delta .vs { display: block; font-size: 9px; font-weight: 400; letter-spacing: 0.15em; color: var(--fg-faint); margin-top: 3px; text-transform: uppercase; }
+
+/* 10-slot grid, 2x5 — contract fill state at a glance */
+.slots { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.slot {
+  aspect-ratio: 1;
+  border: 1px solid var(--surface-line);
+  background: transparent;
+}
+.slot.own  { background: var(--green-dim); border-color: var(--green-dim); }
+.slot.buy  { border-color: var(--amber); background: rgba(255,194,51,0.12); }
+.rar-purple .slot.own { background: #5a2fb0; border-color: #5a2fb0; }
+.rar-pink   .slot.own { background: #8c1e99; border-color: #8c1e99; }
+
+/* status line under slots */
+.need { font-size: 12px; color: var(--amber); }
+.need b { font-weight: 700; }
+.ready { font-size: 12px; color: var(--profit); }
+.locked-msg { font-size: 12px; color: var(--fg-faint); }
+
+/* state variants */
+.node.locked { opacity: 0.55; border-style: dashed; }
+.node.locked .delta { color: var(--fg-dim); }
+
+/* GO button */
+.go {
+  margin-top: auto;
+  padding: 8px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  border: 1px solid var(--surface-line);
+  background: transparent;
+  color: var(--fg-faint);
+}
+.go.armed { background: var(--green); color: var(--void); border-color: var(--green); }
+.go.buy-first { border-color: var(--amber); color: var(--amber); }
+
+/* ---------- connectors ---------- */
+.link {
+  flex: 0 0 56px;
+  align-self: center;
+  position: relative;
+  height: 2px;
+  background: linear-gradient(90deg, var(--green-faint), var(--green-dim));
+}
+.link::after {
+  content: "";
+  position: absolute;
+  right: -1px; top: -3px;
+  border: 4px solid transparent;
+  border-left-color: var(--green-dim);
+}
+.link .pulse {
+  position: absolute;
+  top: -2px; left: 0;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green-hot);
+  box-shadow: 0 0 6px var(--green);
+  animation: travel 2.2s linear infinite;
+}
+@keyframes travel {
+  0%   { left: 0;    opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { left: calc(100% - 6px); opacity: 0; }
+}
+.link.cold { background: var(--surface-line); }
+.link.cold::after { border-left-color: var(--surface-line); }
+.link.cold .pulse { display: none; }
+
+/* ---------- start + destination ---------- */
+.node.start { border-top-color: var(--green-dim); }
+.node.start .stash-count { font-size: 24px; font-weight: 700; color: var(--fg); }
+.node.start .stash-val { font-size: 13px; color: var(--fg-dim); }
+
+.node.dest {
+  flex-basis: 260px;
+  border-color: var(--green-dim);
+  border-top: 3px solid var(--r-red);
+}
+.node.dest::before, .node.dest::after,
+.node.dest .bk::before, .node.dest .bk::after {
+  content: "";
+  position: absolute;
+  width: 10px; height: 10px;
+  border: 2px solid var(--green);
+}
+.node.dest::before { top: -5px; left: -5px; border-right: none; border-bottom: none; }
+.node.dest::after  { top: -5px; right: -5px; border-left: none; border-bottom: none; }
+.node.dest .bk::before { bottom: -5px; left: -5px; border-right: none; border-top: none; }
+.node.dest .bk::after  { bottom: -5px; right: -5px; border-left: none; border-top: none; }
+
+.dest .skin-name { font-size: 15px; font-weight: 700; color: var(--fg); line-height: 1.3; }
+.dest .payout { font-size: 28px; font-weight: 700; color: var(--profit); }
+.dest .spread { display: flex; gap: 10px; font-size: 11px; color: var(--fg-dim); }
+.dest .spread b { color: var(--fg); }
+.dest .odds-note { font-size: 11px; color: var(--fg-faint); }
+
+/* hop count breadcrumb over the rail */
+.crumbs {
+  padding: 0 24px;
+  margin-top: 20px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.crumbs .dot { width: 8px; height: 8px; border: 1px solid var(--green-dim); }
+.crumbs .dot.done { background: var(--green-dim); }
+.crumbs .lbl { margin-left: 8px; }
+
+/* ---------- mobile: vertical tree ---------- */
+@media (max-width: 720px) {
+  .route { flex-direction: column; align-items: stretch; padding: 28px 16px 48px; }
+  .node { flex-basis: auto; }
+  .link {
+    flex-basis: 40px;
+    width: 2px; height: 40px;
+    align-self: center;
+    background: linear-gradient(180deg, var(--green-faint), var(--green-dim));
+  }
+  .link::after {
+    right: auto; top: auto;
+    bottom: -1px; left: -3px;
+    border: 4px solid transparent;
+    border-top-color: var(--green-dim);
+  }
+  @keyframes travel {
+    0%   { top: 0;    left: -2px; opacity: 0; }
+    12%  { opacity: 1; }
+    88%  { opacity: 1; }
+    100% { top: calc(100% - 6px); left: -2px; opacity: 0; }
+  }
+  .link .pulse { top: 0; left: -2px; }
+  header { gap: 18px; }
+  .stat .v { font-size: 17px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .link .pulse { animation: none; opacity: 0.8; left: 50%; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1 class="glow"><span class="prompt">$</span> journeyman --route alpha</h1>
+  <div class="stat">
+    <span class="hud">cash needed</span>
+    <span class="v buyin">$6.30</span>
+    <span class="sub">2 skins to buy</span>
+  </div>
+  <div class="stat">
+    <span class="hud">likely end value</span>
+    <span class="v">$41.80</span>
+    <span class="sub">if odds run normal</span>
+  </div>
+  <div class="stat">
+    <span class="hud">vs. just selling it all</span>
+    <span class="v net-pos">+$8.15</span>
+    <span class="sub">whole route, after fees</span>
+  </div>
+</header>
+
+<div class="crumbs">
+  <span class="dot done"></span><span class="dot"></span><span class="dot"></span>
+  <span class="hud lbl">hop 1 of 3 · ready to fire</span>
+</div>
+
+<div class="route">
+
+  <!-- START -->
+  <div class="node start">
+    <div class="rank"><span class="hud">start</span><span class="hud">your stash</span></div>
+    <div class="stash-count">23 skins</div>
+    <div class="stash-val">sell-now: $27.35</div>
+    <div class="slots">
+      <div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div>
+      <div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div>
+    </div>
+    <div class="hud">this route uses 18 of them</div>
+  </div>
+
+  <div class="link"><div class="pulse"></div></div>
+
+  <!-- HOP 1 -->
+  <div class="node rar-purple">
+    <div class="rank"><span class="tier">RESTRICTED ×10</span><span class="hud">hop 1</span></div>
+    <div class="delta pos">+$1.92<span class="vs">vs. selling these 10</span></div>
+    <div class="slots">
+      <div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div>
+      <div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div>
+    </div>
+    <div class="ready">all 10 in stash · float on target</div>
+    <button class="go armed">RUN TRADE-UP</button>
+  </div>
+
+  <div class="link"><div class="pulse"></div></div>
+
+  <!-- HOP 2 -->
+  <div class="node rar-pink">
+    <div class="rank"><span class="tier">CLASSIFIED ×10</span><span class="hud">hop 2</span></div>
+    <div class="delta pos">+$3.40<span class="vs">vs. selling these 10</span></div>
+    <div class="slots">
+      <div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div>
+      <div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot buy"></div><div class="slot buy"></div>
+    </div>
+    <div class="need">need <b>2 more</b> · buy ~<b>$6.30</b> · unlocks in 3d</div>
+    <button class="go buy-first">BUY 2 → ARM</button>
+  </div>
+
+  <div class="link cold"><div class="pulse"></div></div>
+
+  <!-- HOP 3 -->
+  <div class="node rar-red locked">
+    <div class="rank"><span class="tier">COVERT SHOT</span><span class="hud">hop 3</span></div>
+    <div class="delta">+$2.83<span class="vs">vs. selling these 10</span></div>
+    <div class="slots">
+      <div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div><div class="slot own"></div>
+      <div class="slot own"></div><div class="slot own"></div><div class="slot"></div><div class="slot"></div><div class="slot"></div>
+    </div>
+    <div class="locked-msg">3 slots come from hop 2's payouts</div>
+    <button class="go">WAITING ON HOP 2</button>
+  </div>
+
+  <div class="link cold"><div class="pulse"></div></div>
+
+  <!-- DESTINATION -->
+  <div class="node dest"><span class="bk"></span>
+    <div class="rank"><span class="hud">destination</span><span class="tier" style="color:var(--r-red)">COVERT</span></div>
+    <div class="skin-name">AWP | Fever Dream<br><span class="hud">field-tested · float ~0.24</span></div>
+    <div class="payout">$38.50</div>
+    <div class="spread">
+      <span>rough day <b>$19</b></span>
+      <span>normal <b>$42</b></span>
+      <span>lucky <b>$61</b></span>
+    </div>
+    <div class="odds-note">1 in 5 pulls hits the AWP itself — the rest still sell</div>
+  </div>
+
+</div>
+
+</body>
+</html>

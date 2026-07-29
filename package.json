@@ -7,19 +7,22 @@
     "build": "next build",
     "start": "next start",
     "fetch-data": "tsx scripts/fetch-data.ts",
+    "migrate-db": "tsx scripts/migrate-sqlite-to-pg.ts",
     "admin": "tsx scripts/admin-server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@csfloat/cs2-inspect-serializer": "^1.1.6",
-    "@types/better-sqlite3": "^7.6.13",
     "better-sqlite3": "^12.10.0",
     "next": "^16.2.6",
+    "pg": "^8.13.1",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "20.14.0",
+    "@types/pg": "^8.11.10",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
     "tsx": "4.16.0",

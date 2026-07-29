@@ -17,7 +17,7 @@ export function signedUsd(n: number): string {
 
 // Canonical CS2 rarity colors — the single source of truth for borders in both
 // the inventory grid and the trade-up contract slots.
-export const RARITY_HEX: Record<string, string> = {
+const RARITY_HEX: Record<string, string> = {
   "Consumer Grade": "#b0c3d9",
   "Industrial Grade": "#5e98d9",
   "Mil-Spec Grade": "#4b69ff",
