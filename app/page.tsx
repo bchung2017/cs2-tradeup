@@ -9,25 +9,18 @@ import InventoryPanel from "@/components/InventoryPanel";
 
 export default function Page() {
   return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
-      {/* left: trade-up visualizer (carries the shared CircuitBoard backdrop) */}
-      <div style={{ flex: "1 1 0", minWidth: 0 }}>
+    // On wide screens the two panels are side-by-side columns; below 860px the
+    // .app-shell media query stacks them into rows (console on top, inventory
+    // below). See globals.css.
+    <div className="app-shell">
+      {/* left/top: trade-up visualizer (carries the shared CircuitBoard backdrop) */}
+      <div className="app-col">
         <TradeUpConsole />
       </div>
 
-      {/* right: inventory, independently scrollable. Offset below the top rail
-          so the sticky column starts under it rather than beneath it. */}
-      <div
-        style={{
-          flex: "1 1 0",
-          minWidth: 0,
-          position: "sticky",
-          top: "var(--rail-h)",
-          height: "calc(100vh - var(--rail-h))",
-          overflowY: "auto",
-          borderLeft: "1px solid var(--surface-line)",
-        }}
-      >
+      {/* right/bottom: inventory — independently scrollable on desktop, inline
+          with the page once stacked */}
+      <div className="app-col app-col--inv">
         <InventoryPanel />
       </div>
     </div>

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { TradeupProvider } from "@/lib/tradeup-context";
 import TopRail from "@/components/TopRail";
@@ -6,6 +6,13 @@ import TopRail from "@/components/TopRail";
 export const metadata: Metadata = {
   title: "CS2 Journeyman · Trade-Up Console",
   description: "Single trade-up analysis. Probability, float, average payout.",
+};
+
+// Explicit viewport so the layout scales to the device width on mobile (the
+// page uses a custom <head>, so we set this rather than rely on the default).
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

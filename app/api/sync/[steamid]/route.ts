@@ -26,8 +26,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ steamid: strin
   } catch (e) {
     const err = e as SteamError;
     console.warn(`[sync] steamid=${steamid} FAILED code=${err.code} msg=${err.message}`);
-    if (err.code === "FLOOR") {
-      return NextResponse.json({ code: "FLOOR", retry_ms: err.retryMs ?? 0 }, { status: 429 });
+    // FLOOR (our own courtesy gate) and RATELIMIT (Steam throttling our IP) both
+    // carry a wait, so hand the client retry_ms to drive an honest countdown.
+    if (err.code === "FLOOR" || err.code === "RATELIMIT") {
+      return NextResponse.json(
+        { code: err.code, retry_ms: err.retryMs ?? 0, error: err.message },
+        { status: 429 },
+      );
     }
     const status = CODE_STATUS[err.code] || 500;
     return NextResponse.json({ code: err.code || "UPSTREAM", error: err.message }, { status });
