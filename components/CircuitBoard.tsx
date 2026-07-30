@@ -5,12 +5,12 @@ import { initCircuitKoi } from "./circuit/circuitKoi";
 
 interface Props {
   /** 0..1 ambient activity (filled slots / count). */
-  intensity: number;
+  intensity?: number;
   /** true during contract execution. */
-  surge: boolean;
+  surge?: boolean;
 }
 
-export default function CircuitBoard({ intensity, surge }: Props) {
+export default function CircuitBoard({ intensity = 0.15, surge = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handleRef = useRef<ReturnType<typeof initCircuitKoi> | null>(null);
 
