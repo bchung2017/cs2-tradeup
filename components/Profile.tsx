@@ -82,7 +82,7 @@ export default function Profile() {
   const active = steamid ? profiles.find((p) => p.steamid === steamid) : undefined;
 
   return (
-    <main style={{ maxWidth: 820, margin: "0 auto", padding: "40px 24px 80px" }}>
+    <main style={{ maxWidth: 820, margin: "0 auto", padding: "40px 24px 80px", position: "relative", zIndex: 1 }}>
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
         <div>
           <span className="hud hud-ember">PROFILE</span>

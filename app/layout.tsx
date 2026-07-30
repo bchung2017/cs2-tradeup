@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { TradeupProvider } from "@/lib/tradeup-context";
 import TopRail from "@/components/TopRail";
+import CircuitBoard from "@/components/CircuitBoard";
 
 export const metadata: Metadata = {
   title: "CS2 Journeyman · Trade-Up Console",
@@ -27,9 +28,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        {/* Provider hoisted to the root layout so contract state survives route
-            changes (page.tsx remounts on navigation; layout.tsx persists). The
-            rail lives here too, above every surface. */}
+        {/* Shared background behind every surface; lives in the layout so it
+            never remounts on navigation. */}
+        <CircuitBoard />
         <TradeupProvider>
           <TopRail />
           {children}

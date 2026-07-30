@@ -113,6 +113,8 @@ html, body {
   max-width: 1500px;
   margin: 0 auto;
   padding: 40px 24px 80px;
+  position: relative;
+  z-index: 1;
 }
 /* Opaque card that holds each panel's controls. */
 .pane-card { padding: 22px 22px 24px; }
