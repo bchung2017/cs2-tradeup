@@ -7,9 +7,9 @@ Reference implementation: `journeyman-chain-ui-example.html` (static mock, hardc
 - **Venture** — the route view / chain surface. Journey with money staked;
   the buy-in is in the word. Firmware title treatment available:
   `venture.bin`, `VENTURE_FW`.
-- **IGL 900** — the model (JourneyPlanner policy + JourneySim MC rollout).
+- **IGL-9000** — the model (JourneyPlanner policy + JourneySim MC rollout).
   IGL = in-game leader (shotcaller, reads the economy, calls the buy);
-  900 = machine designation, faint HAL echo without the literalism.
+  9000 = machine designation, faint HAL echo without the literalism.
 - **Lore** — history tracking. Dragon Lore destination + accumulated
   knowledge double read.
 
@@ -25,7 +25,7 @@ The three poles map to the three layers — voice assignments, not themes:
   "this step loses you money vs. selling" is the wake-up. Delta/warning
   copy is flat and undeniable, never softened. Anti-gamba posture IS the
   escape-the-matrix narrative (everyone else's calculators are asleep).
-- **Artemis Fowl → IGL 900's voice.** Boy-genius mastermind working for
+- **Artemis Fowl → IGL-9000's voice.** Boy-genius mastermind working for
   you: suave, precise, faintly smug, mercenary on your behalf.
   "I've found something. Buy two pinks — $6.30 — and hop 2 opens."
   Solves the coddling requirement with style instead of softness.
