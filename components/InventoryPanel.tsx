@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTradeup, isStatTrakName, inventoryInputEligibility } from "@/lib/tradeup-context";
-import { rarityHex, usd } from "@/lib/display";
+import { rarityHex } from "@/lib/display";
 import { lerp, numCompare } from "@/lib/util";
 import PriceModal from "@/components/PriceModal";
+import InventoryCard from "@/components/InventoryCard";
 import type { InventoryItem } from "@/lib/steam";
 
 type StatusClass = "ok" | "warn" | "err" | "dim";
@@ -175,20 +176,23 @@ export default function InventoryPanel() {
     [addFromInventory, setMsg],
   );
 
-  const loadAndRender = useCallback(async () => {
+  // Renders the persisted snapshot (no Steam call). Returns how many items were
+  // loaded so callers can tell whether a cached view is on screen (0 = none).
+  const loadAndRender = useCallback(async (): Promise<number> => {
     const id = steamidRef.current;
-    if (!id) return;
+    if (!id) return 0;
     const r = await api(`/api/inventory/${id}`);
     if (!r.ok) {
       setItems([]);
       setMeta(null);
       setSyncedAt(null);
-      return;
+      return 0;
     }
     const s = r.body as { steamid: string; count: number; items: InventoryItem[]; age_ms?: number };
     setMeta({ steamid: s.steamid, count: s.count });
     setItems(s.items);
     setSyncedAt(Date.now() - (s.age_ms ?? 0));
+    return s.items.length;
   }, []);
 
   // On mount: resolve the default profile -> steamid, then render the last
@@ -230,12 +234,27 @@ export default function InventoryPanel() {
     const r = await api(`/api/sync/${steamidRef.current}?force=1`, { method: "POST" });
     if (!r.ok) {
       const code = r.body?.code;
-      if (code === "RATELIMIT") setMsg("steam 429 // rate limited", "err");
-      else if (code === "PRIVATE") setMsg("inventory private", "err");
-      else if (code === "INFLIGHT") setMsg("sync in progress", "warn");
-      else setMsg(`sync error // ${r.body?.error || r.status}`, "err");
+      // Whatever failed, still show the last cached snapshot so the grid isn't
+      // left empty — a failed refresh shouldn't wipe the view.
+      const cachedCount = await loadAndRender();
+      const hadSnapshot = cachedCount > 0;
+      const retrySecs = Math.ceil((r.body?.retry_ms ?? 0) / 1000);
+      const inClause = retrySecs > 0 ? ` // retry in ${retrySecs}s` : "";
+      const cachedClause = hadSnapshot ? " // showing cached items" : "";
+      if (code === "RATELIMIT") {
+        // Not the user's limit: Steam throttles our shared server IP (all
+        // visitors share it), independent of how recently you opened the app.
+        setMsg(`steam is throttling our server ip${inClause}${cachedClause}`, "warn");
+      } else if (code === "FLOOR") {
+        setMsg(`syncing too fast${inClause}`, "warn");
+      } else if (code === "PRIVATE") {
+        setMsg("inventory private", "err");
+      } else if (code === "INFLIGHT") {
+        setMsg("sync in progress", "warn");
+      } else {
+        setMsg(`sync error // ${r.body?.error || r.status}`, "err");
+      }
       setSyncing(false);
-      await loadAndRender();
       return;
     }
     setMsg(`${r.body.count} items // ${r.body.changed ? "updated" : "unchanged"}`, "ok");
@@ -529,124 +548,15 @@ export default function InventoryPanel() {
               const elig = inventoryInputEligibility(it);
               const ineligible = !elig.eligible;
               return (
-              <div
-                key={it.assetid}
-                className="card-hover"
-                onClick={() => onItemClick(it)}
-                title={ineligible ? elig.reason : "Click to add to trade-up"}
-                aria-disabled={ineligible}
-                style={{
-                  position: "relative",
-                  background: "var(--surface)",
-                  // Ineligible tiles drop their rarity accent for a muted line,
-                  // a subtle visual demotion from the selectable items.
-                  border: `4px solid ${ineligible ? "var(--surface-line)" : rarityHex(it.rarity)}`,
-                  padding: 12,
-                  cursor: ineligible ? "not-allowed" : "pointer",
-                  opacity: ineligible ? 0.45 : 1,
-                }}
-              >
-                {ineligible && (
-                  <span
-                    className="hud"
-                    title={elig.reason}
-                    style={{
-                      position: "absolute",
-                      top: 6,
-                      right: 6,
-                      padding: "1px 5px",
-                      letterSpacing: "0.12em",
-                      color: "var(--cream-dim)",
-                      border: "1px solid var(--surface-line)",
-                      background: "var(--void)",
-                    }}
-                  >
-                    N/A
-                  </span>
-                )}
-                {it.icon_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={it.icon_url}
-                    alt={it.name ?? "item"}
-                    style={{
-                      width: "100%",
-                      height: 90,
-                      objectFit: "contain",
-                      // Desaturate ineligible items so the grid reads selectable
-                      // vs not at a glance, without hiding anything.
-                      filter: ineligible ? "grayscale(1)" : "none",
-                    }}
-                  />
-                ) : (
-                  <div style={{ height: 90 }} />
-                )}
-                <div style={{ fontSize: 12, lineHeight: 1.3, margin: "8px 0 4px" }}>
-                  {it.name ?? "(unnamed)"}
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                  {/* Grade: an uppercase, wide-tracked amber HUD label. */}
-                  <span className="hud hud-amber">{it.rarity ?? "—"}</span>
-                  {/* Float: deliberately NOT a HUD label — a tight, tabular green
-                      number so the precise wear value reads distinctly from the
-                      grade category beside it. */}
-                  {it.float != null && (
-                    <span
-                      title="Float (wear value)"
-                      style={{
-                        fontFamily: "var(--mono)",
-                        fontVariantNumeric: "tabular-nums",
-                        fontSize: 12,
-                        letterSpacing: "0.01em",
-                        color: "var(--green)",
-                      }}
-                    >
-                      {it.float.toFixed(4)}
-                    </span>
-                  )}
-                </div>
-                {/* Median market price. When priced, it's a button: clicking it
-                    (without staging the item) opens a per-marketplace breakdown.
-                    stopPropagation keeps the tile's add-to-trade-up from firing. */}
-                {it.price != null ? (
-                  <button
-                    type="button"
-                    className="hud"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPriceModalItem(it);
-                    }}
-                    title="Compare prices across marketplaces"
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      marginTop: 4,
-                      padding: 0,
-                      background: "transparent",
-                      border: "none",
-                      textAlign: "right",
-                      color: "var(--green)",
-                      cursor: "pointer",
-                      textDecoration: "underline",
-                      textDecorationStyle: "dotted",
-                      textUnderlineOffset: 3,
-                      textDecorationColor: "var(--green-dim)",
-                      font: "inherit",
-                      letterSpacing: "inherit",
-                    }}
-                  >
-                    {usd(it.price)}
-                  </button>
-                ) : (
-                  <div
-                    className="hud"
-                    style={{ marginTop: 4, textAlign: "right", color: "var(--cream-dim)" }}
-                    title="No market price for this item"
-                  >
-                    no price
-                  </div>
-                )}
-              </div>
+                <InventoryCard
+                  key={it.assetid}
+                  item={it}
+                  ineligible={ineligible}
+                  reason={elig.reason}
+                  title={ineligible ? elig.reason : "Click to add to trade-up"}
+                  onCardClick={() => onItemClick(it)}
+                  onPriceClick={() => setPriceModalItem(it)}
+                />
               );
             })}
           </div>

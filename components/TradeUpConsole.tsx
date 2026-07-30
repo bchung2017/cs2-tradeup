@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import CircuitBoard from "@/components/CircuitBoard";
 import SkinPicker from "@/components/SkinPicker";
 import PriceModal, { marketName } from "@/components/PriceModal";
 import { oddsString, rarityColor, rarityHex, signedUsd, usd } from "@/lib/display";
@@ -96,7 +95,6 @@ export default function TradeUpConsole() {
 
   return (
     <>
-      <CircuitBoard intensity={filled / count} surge={running} />
       <main className="pane pane--console">
       <div
         className="pane-card"
