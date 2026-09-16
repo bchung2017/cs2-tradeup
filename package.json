@@ -8,6 +8,7 @@
     "start": "next start",
     "fetch-data": "tsx scripts/fetch-data.ts",
     "migrate-db": "tsx scripts/migrate-sqlite-to-pg.ts",
+    "igl9000-check": "tsx scripts/igl9000-check.ts",
     "admin": "tsx scripts/admin-server.ts",
     "typecheck": "tsc --noEmit"
   },
