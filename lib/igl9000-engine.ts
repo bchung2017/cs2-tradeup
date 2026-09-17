@@ -85,6 +85,7 @@ export interface ValuedContract {
   buyCost: number; // Σ ask over bought slots — what you must spend now
   pricedProb: number; // fraction of outcome probability that was priced
   approx: boolean; // some outcome/slot unpriced → ev/cost are bounds
+  usesOwned: number; // slots drawn from the holder's inventory (0 = pure speculation)
 }
 
 // Tiers that can be an INPUT (nextRarity returns null for the top two tiers, so
@@ -168,6 +169,7 @@ export function valueContract(
     buyCost,
     pricedProb,
     approx: pricedProb < 0.999 || pricedSlots < contract.slots.length,
+    usesOwned: contract.slots.filter((s) => s.owned).length,
   };
 }
 
@@ -465,6 +467,138 @@ function buildExposureCandidates(
   return out;
 }
 
+// Cross-collection math (§3.2). Because each output of collection C carries
+// probability n_C / (10 * k_C), the expected value of a mixed contract is the
+// slot-weighted average of the collections' mean output values:
+//
+//   EV    = Σ_C (n_C / 10) · meanOut_C
+//   cost  = Σ_C n_C · inputCost_C
+//   delta = Σ_C n_C · [ meanOut_C / 10 − inputCost_C ]
+//                      └──────── marginal value of ONE slot given to C ────────┘
+//
+// So for a fixed output-float regime delta is LINEAR in the slot counts: every
+// collection has a constant marginal value per slot, and the optimum is simply
+// to fill all ten slots with the highest-marginal sources available. No sweep,
+// no search — sort by marginal and take ten.
+//
+// The linearity is exact only within a float regime, because the output wear (and
+// so meanOut_C) depends on the average input float shared by all slots. That is
+// why the ranking here is a PROPOSAL: valueContract re-prices the assembled
+// contract exactly, at its real output float, and bestMove ranks on that.
+//
+// Owned items enter the same ranking at their opportunity cost (bid_net) and a
+// quantity of one, so "burn this cheap thing I already have" and "buy exposure to
+// that rich collection" compete on one scale instead of being separate rules.
+interface SlotSource {
+  collectionId: string;
+  collectionName: string;
+  skinId: string;
+  float: number;
+  owned: boolean;
+  cost: number; // bid_net (owned) or ask (bought)
+  marginal: number; // meanOut_C / 10 − cost
+  available: number; // 1 for a specific owned item, Infinity for a buy
+}
+
+function buildSplitCandidates(
+  tier: Rarity,
+  owned: Holding[],
+  skinById: Map<string, Skin>,
+  quote: PriceProvider,
+  isStatTrak: boolean,
+  allSkins: Skin[],
+): CandidateContract[] {
+  const outTier = nextTier(tier);
+  if (!outTier) return [];
+
+  // mean output value per collection, cached
+  const meanByCol = new Map<string, number>();
+  const meanOf = (id: string) => {
+    let m = meanByCol.get(id);
+    if (m == null) {
+      m = meanOutputValue(id, outTier, allSkins, quote, isStatTrak).mean;
+      meanByCol.set(id, m);
+    }
+    return m;
+  };
+
+  const sources: SlotSource[] = [];
+
+  // buyable source per collection (uniform condition, cheapest bracket)
+  const cols = new Map<string, { id: string; name: string }>();
+  for (const s of skinById.values()) {
+    if (s.rarity.name !== tier || s.souvenir || !hasNextTierOutput(s, allSkins)) continue;
+    const c = primaryCollection(s);
+    if (c) cols.set(c.id, c);
+  }
+  for (const c of cols.values()) {
+    const buy = pickBuy(buyMenu(tier, c.id, skinById, quote, isStatTrak, allSkins), "cheap");
+    const mean = meanOf(c.id);
+    if (!buy || mean <= 0) continue;
+    sources.push({
+      collectionId: c.id, collectionName: c.name, skinId: buy.skinId, float: buy.float,
+      owned: false, cost: buy.ask, marginal: mean / STANDARD_SIZE - buy.ask, available: Infinity,
+    });
+  }
+
+  // each owned item is its own source, costed at what selling it would net
+  for (const h of owned) {
+    const skin = skinById.get(h.skinId);
+    if (!skin || !hasNextTierOutput(skin, allSkins)) continue;
+    const c = primaryCollection(skin);
+    if (!c) continue;
+    const q = quote(h.skinId, floatToWear(h.float), isStatTrak, h.float);
+    if (!q) continue;
+    const mean = meanOf(c.id);
+    if (mean <= 0) continue;
+    sources.push({
+      collectionId: c.id, collectionName: c.name, skinId: h.skinId, float: h.float,
+      owned: true, cost: q.bid_net, marginal: mean / STANDARD_SIZE - q.bid_net, available: 1,
+    });
+  }
+  if (!sources.length) return [];
+
+  // Greedy fill by marginal value — the optimum of the linear program above.
+  const fill = (pool: SlotSource[]): CandidateContract | null => {
+    const ranked = [...pool].sort(
+      (a, b) => b.marginal - a.marginal || a.cost - b.cost || (a.skinId < b.skinId ? -1 : 1),
+    );
+    const slots: ContractSlot[] = [];
+    for (const src of ranked) {
+      let n = src.available === Infinity ? STANDARD_SIZE - slots.length : src.available;
+      while (n-- > 0 && slots.length < STANDARD_SIZE) {
+        slots.push({ skinId: src.skinId, float: src.float, owned: src.owned });
+      }
+      if (slots.length >= STANDARD_SIZE) break;
+    }
+    if (slots.length < STANDARD_SIZE) return null;
+    const names = new Set(
+      slots.flatMap((sl) => {
+        const c = primaryCollection(skinById.get(sl.skinId)!);
+        return c ? [c.name] : [];
+      }),
+    );
+    const lead = [...names][0] ?? "Mixed";
+    return {
+      tier, size: STANDARD_SIZE, collectionId: "*split*",
+      collectionName: names.size > 1 ? `${lead} + ${names.size - 1} more` : lead,
+      slots, buys: slots.filter((sl) => !sl.owned).length,
+    };
+  };
+
+  const out: CandidateContract[] = [];
+  const best = fill(sources);
+  if (best) out.push(best);
+  // Same optimum restricted to contracts that actually consume something you own
+  // — a pure-buy contract is speculation, not a move on your inventory.
+  const ownedSources = sources.filter((s) => s.owned);
+  if (ownedSources.length) {
+    const forced = fill([...ownedSources.sort((a, b) => b.marginal - a.marginal).slice(0, 1), ...sources]);
+    if (forced) out.push(forced);
+  }
+  return out;
+}
+
 // §3.2 — enumerate candidate contracts from holdings. Groups owned items by
 // (tier, collection), then emits several assignment-optimized candidates per
 // group (see buildCandidates). A group whose collection has no next-tier output
@@ -526,24 +660,36 @@ export function enumerateContracts(
   const exposure = [...byTier.entries()].flatMap(([tier, owned]) =>
     buildExposureCandidates(tier, owned, skinById, quote, isStatTrak, allSkins),
   );
-  return [...single, ...mixed, ...exposure];
+  const split = [...byTier.entries()].flatMap(([tier, owned]) =>
+    buildSplitCandidates(tier, owned, skinById, quote, isStatTrak, allSkins),
+  );
+  return [...single, ...mixed, ...exposure, ...split];
 }
 
 // §3.5 — the greedy planner. Value every candidate, keep those that are
 // profitable (delta > 0) and affordable (buyCost ≤ cash), return the best by
 // delta. null = no positive move (the honest "just sell" answer).
+// `minOwned` is how many of the ten slots must come from the holder's own
+// inventory. It matters because a contract that buys all ten slots is not a
+// trade-up of anything you own — it is a cash bet on a collection, and since
+// pure-buy contracts face no opportunity cost they tend to post the highest raw
+// delta and crowd out every real move. Default 1: answer the question actually
+// being asked ("what should I do with MY skins?"). Pass 0 to include pure
+// speculation, and read the plays it returns for what they are.
 export function bestMove(
   holdings: Holding[],
   skinById: Map<string, Skin>,
   quote: PriceProvider,
   cash: number,
   isStatTrak: boolean,
+  minOwned = 1,
 ): ValuedContract | null {
   const candidates = enumerateContracts(holdings, skinById, quote, isStatTrak);
   let best: ValuedContract | null = null;
   for (const c of candidates) {
     const v = valueContract(c, skinById, quote, isStatTrak);
     if (!v) continue;
+    if (v.usesOwned < minOwned) continue;
     if (v.buyCost > cash) continue;
     if (v.delta <= 0) continue;
     if (!best || v.delta > best.delta) best = v;
