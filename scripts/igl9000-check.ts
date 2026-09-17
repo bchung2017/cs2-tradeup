@@ -114,6 +114,50 @@ ok("seam: unpriced key -> null", quote("nope", "Field-Tested", false) === null);
   ok("determinism: two runs are byte-identical", JSON.stringify(a) === JSON.stringify(b));
 }
 
+// ── 7 & 8. input assignment: float steering + don't-burn-value ───────────────
+// Second fixture: output priced much higher in Minimal Wear than Field-Tested,
+// so which inputs (and floats) you pick moves the payout.
+{
+  const col: Collection = { id: "c2", name: "C2" };
+  const s = (id: string, r: Rarity): Skin => ({
+    id, name: id, weapon: { id: "w", name: "W" }, rarity: { id: r, name: r },
+    min_float: 0, max_float: 1, collections: [col],
+  });
+  const sb = new Map(
+    [s("in1", "Mil-Spec Grade"), s("in_exp", "Mil-Spec Grade"), s("out1", "Restricted")].map((x) => [x.id, x]),
+  );
+  const pr: PriceTable = {
+    "out1|Minimal Wear|norm": { median: 5.0, lowest: 5, volume: 1 },
+    "out1|Field-Tested|norm": { median: 2.0, lowest: 2, volume: 1 },
+    "in1|Minimal Wear|norm": { median: 0.1, lowest: 0.1, volume: 1 },
+    "in1|Field-Tested|norm": { median: 0.1, lowest: 0.1, volume: 1 },
+    "in_exp|Field-Tested|norm": { median: 0.5, lowest: 0.5, volume: 1 }, // too valuable to burn
+  };
+  const q2 = mockPriceProvider(pr);
+
+  // 7. steering: 14 owned (4 high-float first, then 10 low-float). The optimizer
+  //    should pick the 10 low-float items -> Minimal Wear output -> big delta,
+  //    even though inventory order leads with the high-float ones.
+  const h7: Holding[] = [
+    ...[...Array(4)].map(() => ({ skinId: "in1", float: 0.3, stattrak: false }) as Holding),
+    ...[...Array(10)].map(() => ({ skinId: "in1", float: 0.1, stattrak: false }) as Holding),
+  ];
+  const best7 = bestMove(h7, sb, q2, 100, false)!;
+  ok("steer: chose the low-float ten (output = Minimal Wear)", best7.outcomes[0].wear === "Minimal Wear", best7?.outcomes[0].wear);
+  ok("steer: delta = +4.00 (EV 5.0 − cost 1.0), not the +1.0 mixed pick", near(best7.delta, 4.0), `delta=${best7.delta}`);
+  ok("steer: no buys (used owned)", best7.contract.buys === 0);
+
+  // 8. don't-burn-value: 9 cheap inputs + 1 pricey owned. The pricey one
+  //    (bid_net 0.50 > filler ask 0.10) must be kept out; complete with a buy.
+  const h8: Holding[] = [
+    ...[...Array(9)].map(() => ({ skinId: "in1", float: 0.1, stattrak: false }) as Holding),
+    { skinId: "in_exp", float: 0.2, stattrak: false },
+  ];
+  const best8 = bestMove(h8, sb, q2, 100, false)!;
+  ok("don't-burn: pricey owned item is NOT in the contract", best8.contract.slots.every((sl) => sl.skinId !== "in_exp"));
+  ok("don't-burn: completed with exactly 1 buy instead", best8.contract.buys === 1, `buys=${best8.contract.buys}`);
+}
+
 // ── summary ──────────────────────────────────────────────────────────────────
 console.log(
   failures === 0 ? "\nALL PASS ✓" : `\n${failures} FAILURE(S) ✗`,

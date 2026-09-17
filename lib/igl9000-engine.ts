@@ -1,22 +1,41 @@
-// IGL-9000 — the engine core (slice 1: valuation + single-hop planner).
+// IGL-9000 — the engine core (valuation + input-assignment + single-hop planner).
 //
 // One deterministic engine, parameterized by a PriceProvider (the only live
-// input). This slice implements the bottom of the pipeline from
+// input). Implements the bottom of the pipeline from
 // context/igl9000-engine-spec.md:
-//   §3.2 enumerate candidate contracts  (structural, no prices)
+//   §3.2 enumerate candidate contracts  (structural, no prices) — now includes
+//        input ASSIGNMENT: which owned items to commit + which floats to buy, so
+//        the output float is steered toward the best-value wear bracket.
 //   §3.3 odds / output floats           (reuses computeTradeup)
 //   §3.4 value a contract -> signed delta   (the only `quote` caller)
 //   §3.5 best_move (single hop)         (greedy argmax over positive-delta, affordable)
 //
-// The chain rollout (JourneySim / Monte-Carlo) and the Route assembly are later
-// slices; this layer is what they'll call.
-//
-// Simplifications flagged as v1 (single-collection contracts, no float steering,
-// standard ×10 only) — each is a local extension, not a re-architecture.
+// Assignment model (§3.2, "assign_skins"): input SELECTION is a real lever,
+// because the output float — hence the output wear, hence the payout — is the
+// average of the inputs' normalized floats. Two rules:
+//   • Don't burn value: an owned item is worth consuming only if its bid_net is
+//     ≤ the cheapest completion ask; otherwise you'd sell it and buy a filler.
+//   • Steer the float: prefer inputs (owned picks + bought floats) that push the
+//     average into the highest-value output wear bracket.
+// Selection is a BOUNDED candidate search (cost-floor / steer-low / steer-high);
+// valuation via computeTradeup + quote is EXACT, and bestMove ranks candidates
+// by that exact delta — so the ranking is correct even though the generator is
+// heuristic. A provably-optimal min-cost-hits-a-float-bracket solver is a future
+// refinement. Still v1 elsewhere: single-collection contracts, standard ×10.
 
 import { computeTradeup, floatToWear } from "@/lib/tradeup";
-import { WEAR_RANGES, type Rarity, type Skin } from "@/types/cs2";
+import { WEAR_RANGES, type Rarity, type Skin, type Wear } from "@/types/cs2";
 import type { PriceProvider } from "@/lib/igl9000-quote";
+
+const EPS = 1e-9;
+
+/** Normalize a float into [0,1] on the skin's own min/max range (mirrors the
+ *  private helper in tradeup.ts — output float is the mean of these). */
+function normalizeFloat(f: number, min: number, max: number): number {
+  if (max <= min) return 0;
+  return Math.min(1, Math.max(0, (f - min) / (max - min)));
+}
+
 
 // A normalized inventory item.
 export interface Holding {
@@ -151,43 +170,150 @@ export function valueContract(
   };
 }
 
-// Cheapest catalog skin of a given tier+collection to BUY, and the wear/float to
-// buy it at (v1: cheapest priced wear; float = that wear's bracket midpoint).
-// Returns null when nothing in that tier+collection is priced.
-function cheapestBuy(
+// A way to complete a contract: buy a specific catalog skin in a specific wear
+// bracket, at that bracket's cheapest ask, choosing any float within it. One
+// entry per priced wear bracket present in the tier+collection → the steering
+// menu (buy low-wear to pull the average down, high-wear to push it up).
+interface BuyOption {
+  skinId: string;
+  wear: Wear;
+  min: number; // bracket float range — the float is ours to choose within it
+  max: number;
+  ask: number;
+}
+
+// Cheapest buy per wear bracket for a tier+collection. Sorted low→high wear.
+function buyMenu(
   tier: Rarity,
   collectionId: string,
   skinById: Map<string, Skin>,
   quote: PriceProvider,
   isStatTrak: boolean,
-): { skinId: string; float: number } | null {
-  let best: { skinId: string; float: number; ask: number } | null = null;
-  for (const skin of skinById.values()) {
-    if (skin.rarity.name !== tier || skin.souvenir) continue;
-    if (!skin.collections.some((c) => c.id === collectionId)) continue;
-    for (const wr of WEAR_RANGES) {
+): BuyOption[] {
+  const menu: BuyOption[] = [];
+  for (const wr of WEAR_RANGES) {
+    let best: BuyOption | null = null;
+    for (const skin of skinById.values()) {
+      if (skin.rarity.name !== tier || skin.souvenir) continue;
+      if (!skin.collections.some((c) => c.id === collectionId)) continue;
       const q = quote(skin.id, wr.wear, isStatTrak);
       if (!q) continue;
-      if (!best || q.ask < best.ask) {
-        best = { skinId: skin.id, float: (wr.min + wr.max) / 2, ask: q.ask };
+      if (!best || q.ask < best.ask || (q.ask === best.ask && skin.id < best.skinId)) {
+        best = { skinId: skin.id, wear: wr.wear, min: wr.min, max: wr.max, ask: q.ask };
       }
     }
+    if (best) menu.push(best);
   }
-  return best ? { skinId: best.skinId, float: best.float } : null;
+  return menu;
 }
 
-// §3.2 — enumerate candidate contracts from holdings. v1: one contract per
-// (tier, collection) group that has ≥1 owned item; owned fill first, any
-// shortfall is completed with the cheapest same-tier/collection buy. A group
-// whose collection has no next-tier output is left in — valueContract() will
-// reject it via computeTradeup, which is the single eligibility authority.
+// Pick a buy for a steering direction. "cheap" = lowest ask (bracket mid float);
+// "low"/"high" = the cheapest option in the lowest/highest priced wear bracket,
+// bought at that bracket's edge to move the average as far as it goes.
+function pickBuy(
+  menu: BuyOption[],
+  mode: "cheap" | "low" | "high",
+): { skinId: string; float: number; ask: number } | null {
+  if (!menu.length) return null;
+  if (mode === "cheap") {
+    const b = menu.reduce((a, x) => (x.ask < a.ask ? x : a));
+    return { skinId: b.skinId, float: (b.min + b.max) / 2, ask: b.ask };
+  }
+  if (mode === "low") {
+    const b = menu[0]; // lowest wear bracket present
+    return { skinId: b.skinId, float: b.min, ask: b.ask };
+  }
+  const b = menu[menu.length - 1]; // highest wear bracket present
+  return { skinId: b.skinId, float: Math.max(b.min, b.max - EPS), ask: b.ask };
+}
+
+interface Consumable {
+  h: Holding;
+  cost: number; // bid_net — opportunity cost of consuming it
+  norm: number; // normalized float — what it contributes to the output-float average
+  idx: number; // original position, for stable tie-breaks
+}
+
+// Build the candidate contracts for one (tier, collection) group. Applies the
+// two assignment rules: exclude owned items too valuable to burn (bid_net above
+// the cheapest ask), then generate cost-floor / steer-low / steer-high variants.
+// All are valued exactly downstream; bestMove keeps the best.
+function buildCandidates(
+  group: { tier: Rarity; collectionId: string; collectionName: string; owned: Holding[] },
+  skinById: Map<string, Skin>,
+  quote: PriceProvider,
+  isStatTrak: boolean,
+): CandidateContract[] {
+  const menu = buyMenu(group.tier, group.collectionId, skinById, quote, isStatTrak);
+  const buyCheap = pickBuy(menu, "cheap");
+  const buyLow = pickBuy(menu, "low");
+  const buyHigh = pickBuy(menu, "high");
+  const buyFloorAsk = buyCheap ? buyCheap.ask : Infinity;
+
+  // Owned items worth consuming: priced, and bid_net ≤ the cheapest filler ask.
+  // Anything pricier is kept (sell it, buy a filler instead of burning it).
+  const consumable: Consumable[] = [];
+  group.owned.forEach((h, idx) => {
+    const skin = skinById.get(h.skinId);
+    if (!skin) return;
+    const q = quote(h.skinId, floatToWear(h.float), isStatTrak);
+    if (!q) return;
+    if (q.bid_net > buyFloorAsk + EPS) return; // too valuable to burn
+    consumable.push({ h, cost: q.bid_net, norm: normalizeFloat(h.float, skin.min_float, skin.max_float), idx });
+  });
+  if (!consumable.length) return []; // nothing worth seeding a contract with
+
+  const assemble = (
+    picks: Consumable[],
+    buy: { skinId: string; float: number } | null,
+  ): CandidateContract | null => {
+    const chosen = picks.slice(0, STANDARD_SIZE);
+    const slots: ContractSlot[] = chosen.map((c) => ({
+      skinId: c.h.skinId,
+      float: c.h.float,
+      owned: true,
+    }));
+    const need = STANDARD_SIZE - slots.length;
+    if (need > 0) {
+      if (!buy) return null; // can't complete this contract
+      for (let i = 0; i < need; i++) slots.push({ skinId: buy.skinId, float: buy.float, owned: false });
+    }
+    return {
+      tier: group.tier,
+      size: STANDARD_SIZE,
+      collectionId: group.collectionId,
+      collectionName: group.collectionName,
+      slots,
+      buys: need > 0 ? need : 0,
+    };
+  };
+
+  // Three selection orders. With >10 consumable, these pick different owned tens
+  // (cost-floor vs. lowest-float vs. highest-float); with <10 they share the
+  // same owned set and differ only by the buy variant (float tuning).
+  const byCost = [...consumable].sort((a, b) => a.cost - b.cost || a.norm - b.norm || a.idx - b.idx);
+  const byNormAsc = [...consumable].sort((a, b) => a.norm - b.norm || a.cost - b.cost || a.idx - b.idx);
+  const byNormDesc = [...consumable].sort((a, b) => b.norm - a.norm || a.cost - b.cost || a.idx - b.idx);
+
+  const candidates = [
+    assemble(byCost, buyCheap), // cost-floor
+    assemble(byNormAsc, buyLow ?? buyCheap), // steer output float down
+    assemble(byNormDesc, buyHigh ?? buyCheap), // steer output float up
+  ];
+  return candidates.filter((c): c is CandidateContract => c !== null);
+}
+
+// §3.2 — enumerate candidate contracts from holdings. Groups owned items by
+// (tier, collection), then emits several assignment-optimized candidates per
+// group (see buildCandidates). A group whose collection has no next-tier output
+// stays in — valueContract() rejects it via computeTradeup, the single
+// eligibility authority.
 export function enumerateContracts(
   holdings: Holding[],
   skinById: Map<string, Skin>,
   quote: PriceProvider,
   isStatTrak: boolean,
 ): CandidateContract[] {
-  // group owned holdings by `${tier}|${collectionId}`
   const groups = new Map<
     string,
     { tier: Rarity; collectionId: string; collectionName: string; owned: Holding[] }
@@ -206,30 +332,7 @@ export function enumerateContracts(
     groups.set(key, g);
   }
 
-  const contracts: CandidateContract[] = [];
-  for (const g of groups.values()) {
-    const slots: ContractSlot[] = g.owned
-      .slice(0, STANDARD_SIZE)
-      .map((h) => ({ skinId: h.skinId, float: h.float, owned: true }));
-
-    if (slots.length < STANDARD_SIZE) {
-      const buy = cheapestBuy(g.tier, g.collectionId, skinById, quote, isStatTrak);
-      if (!buy) continue; // can't complete this contract at any price → drop it
-      while (slots.length < STANDARD_SIZE) {
-        slots.push({ skinId: buy.skinId, float: buy.float, owned: false });
-      }
-    }
-
-    contracts.push({
-      tier: g.tier,
-      size: STANDARD_SIZE,
-      collectionId: g.collectionId,
-      collectionName: g.collectionName,
-      slots,
-      buys: slots.filter((s) => !s.owned).length,
-    });
-  }
-  return contracts;
+  return [...groups.values()].flatMap((g) => buildCandidates(g, skinById, quote, isStatTrak));
 }
 
 // §3.5 — the greedy planner. Value every candidate, keep those that are
