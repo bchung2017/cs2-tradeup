@@ -21,10 +21,11 @@
 // valuation via computeTradeup + quote is EXACT, and bestMove ranks candidates
 // by that exact delta — so the ranking is correct even though the generator is
 // heuristic. A provably-optimal min-cost-hits-a-float-bracket solver is a future
-// refinement. Still v1 elsewhere: single-collection contracts, standard ×10.
+// refinement. Contracts may be single-collection or MIXED (pooled across a
+// tier); still v1 on the standard x10 size (the x5 knife contract is unbuilt).
 
 import { computeTradeup, floatToWear } from "@/lib/tradeup";
-import { WEAR_RANGES, type Rarity, type Skin, type Wear } from "@/types/cs2";
+import { RARITY_ORDER, WEAR_RANGES, type Rarity, type Skin, type Wear } from "@/types/cs2";
 import type { PriceProvider } from "@/lib/igl9000-quote";
 
 const EPS = 1e-9;
@@ -182,20 +183,46 @@ interface BuyOption {
   ask: number;
 }
 
-// Cheapest buy per wear bracket for a tier+collection. Sorted low→high wear.
+// Does this skin have anywhere to trade up TO — i.e. does one of its tradeable
+// collections contain a next-tier, non-souvenir skin? Mirrors the eligibility
+// gate in computeTradeup (lib/tradeup.ts:82). Single-collection contracts could
+// rely on computeTradeup throwing, but a MIXED contract is only as good as its
+// worst input: one ineligible item rejects the whole thing. So candidates are
+// pre-filtered rather than built and discarded.
+function hasNextTierOutput(skin: Skin, allSkins: Skin[]): boolean {
+  const out = nextTier(skin.rarity.name);
+  if (!out) return false;
+  return skin.collections
+    .filter((c) => !EXCLUDED_COLLECTIONS.has(c.name))
+    .some((c) => allSkins.some((s) => s.rarity.name === out && !s.souvenir && s.collections.some((y) => y.id === c.id)));
+}
+
+function nextTier(r: Rarity): Rarity | null {
+  const i = RARITY_ORDER.indexOf(r);
+  if (i < 0 || i >= RARITY_ORDER.length - 2) return null;
+  return RARITY_ORDER[i + 1];
+}
+
+// Cheapest buy per wear bracket. `collectionId` null means "any collection at
+// this tier" — the mixed-contract case, where a completion buy may come from a
+// different collection than the owned inputs (which is legal, and shifts the
+// count vector; computeTradeup prices that correctly). Sorted low→high wear.
 function buyMenu(
   tier: Rarity,
-  collectionId: string,
+  collectionId: string | null,
   skinById: Map<string, Skin>,
   quote: PriceProvider,
   isStatTrak: boolean,
+  allSkins: Skin[],
 ): BuyOption[] {
   const menu: BuyOption[] = [];
   for (const wr of WEAR_RANGES) {
     let best: BuyOption | null = null;
     for (const skin of skinById.values()) {
       if (skin.rarity.name !== tier || skin.souvenir) continue;
-      if (!skin.collections.some((c) => c.id === collectionId)) continue;
+      if (collectionId !== null && !skin.collections.some((c) => c.id === collectionId)) continue;
+      // A bought input must itself be tradeable, or it poisons the contract.
+      if (!hasNextTierOutput(skin, allSkins)) continue;
       // Menu prices the bracket at its midpoint — a representative float for
       // *selection*. The exact float's cost is recomputed in valueContract,
       // which stays the source of truth.
@@ -242,12 +269,13 @@ interface Consumable {
 // the cheapest ask), then generate cost-floor / steer-low / steer-high variants.
 // All are valued exactly downstream; bestMove keeps the best.
 function buildCandidates(
-  group: { tier: Rarity; collectionId: string; collectionName: string; owned: Holding[] },
+  group: { tier: Rarity; collectionId: string | null; collectionName: string; owned: Holding[] },
   skinById: Map<string, Skin>,
   quote: PriceProvider,
   isStatTrak: boolean,
+  allSkins: Skin[],
 ): CandidateContract[] {
-  const menu = buyMenu(group.tier, group.collectionId, skinById, quote, isStatTrak);
+  const menu = buyMenu(group.tier, group.collectionId, skinById, quote, isStatTrak, allSkins);
   const buyCheap = pickBuy(menu, "cheap");
   const buyLow = pickBuy(menu, "low");
   const buyHigh = pickBuy(menu, "high");
@@ -259,6 +287,9 @@ function buildCandidates(
   group.owned.forEach((h, idx) => {
     const skin = skinById.get(h.skinId);
     if (!skin) return;
+    // An input with nowhere to trade up to rejects the whole contract — and in a
+    // mixed contract that would waste every other slot. Drop it up front.
+    if (!hasNextTierOutput(skin, allSkins)) return;
     const q = quote(h.skinId, floatToWear(h.float), isStatTrak, h.float);
     if (!q) return;
     if (q.bid_net > buyFloorAsk + EPS) return; // too valuable to burn
@@ -281,11 +312,20 @@ function buildCandidates(
       if (!buy) return null; // can't complete this contract
       for (let i = 0; i < need; i++) slots.push({ skinId: buy.skinId, float: buy.float, owned: false });
     }
+    const mixed = group.collectionId === null;
+    const distinct = mixed
+      ? new Set(
+          slots.flatMap((sl) => {
+            const c = primaryCollection(skinById.get(sl.skinId)!);
+            return c ? [c.name] : [];
+          }),
+        )
+      : null;
     return {
       tier: group.tier,
       size: STANDARD_SIZE,
-      collectionId: group.collectionId,
-      collectionName: group.collectionName,
+      collectionId: group.collectionId ?? "*mixed*",
+      collectionName: mixed ? `Mixed (${distinct!.size} collections)` : group.collectionName,
       slots,
       buys: need > 0 ? need : 0,
     };
@@ -335,7 +375,36 @@ export function enumerateContracts(
     groups.set(key, g);
   }
 
-  return [...groups.values()].flatMap((g) => buildCandidates(g, skinById, quote, isStatTrak));
+  // Mixed-collection groups: one per TIER, pooling that tier's holdings across
+  // every collection. CS2 allows it, and computeTradeup already prices the
+  // resulting count vector correctly (n_C per collection, weight split across
+  // overlaps) — so this needs no new math, only a wider candidate pool. It is
+  // strictly additive: the single-collection candidates above remain, and
+  // bestMove ranks all of them by the same exact delta.
+  const byTier = new Map<Rarity, Holding[]>();
+  for (const g of groups.values()) {
+    const list = byTier.get(g.tier) ?? [];
+    list.push(...g.owned);
+    byTier.set(g.tier, list);
+  }
+
+  const allSkins = [...skinById.values()];
+  const single = [...groups.values()].flatMap((g) =>
+    buildCandidates(g, skinById, quote, isStatTrak, allSkins),
+  );
+  const mixed = [...byTier.entries()]
+    // A tier that only ever had one collection produces the same contract twice.
+    .filter(([tier]) => new Set([...groups.values()].filter((g) => g.tier === tier).map((g) => g.collectionId)).size > 1)
+    .flatMap(([tier, owned]) =>
+      buildCandidates(
+        { tier, collectionId: null, collectionName: "Mixed", owned },
+        skinById,
+        quote,
+        isStatTrak,
+        allSkins,
+      ),
+    );
+  return [...single, ...mixed];
 }
 
 // §3.5 — the greedy planner. Value every candidate, keep those that are
