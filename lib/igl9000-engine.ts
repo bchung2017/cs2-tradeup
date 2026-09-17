@@ -24,14 +24,9 @@
 // refinement. Contracts may be single-collection or MIXED (pooled across a
 // tier), and either the standard x10 or the x5 Covert->knife contract.
 //
-// KNOWN DEFECT (knife contracts): the catalog lists each Doppler as seven
-// separate skins (Phase 1-4, Ruby, Sapphire, Black Pearl) while Steam prices
-// them under ONE market name, so all seven carry the same price. valueContract
-// treats each row as its own outcome, which hands Doppler ~3.5x its true
-// probability weight and, because Doppler is the expensive finish, inflates a
-// Chroma 2 knife contract's EV by 2.14x (measured). Fix is to merge outcomes by
-// market name before weighting. Until then, treat any Extraordinary-output EV as
-// an overestimate.
+// Outcomes are collapsed by (market name, wear) before weighting — see
+// valueContract. Without it the catalog's seven Doppler phase rows each count as
+// a separate outcome and inflate a knife contract's EV by ~2x.
 
 import { computeTradeup, floatToWear } from "@/lib/tradeup";
 import { RARITY_ORDER, WEAR_RANGES, type Rarity, type Skin, type Wear } from "@/types/cs2";
@@ -150,24 +145,42 @@ export function valueContract(
     return null; // ineligible / mixed rarity → not a candidate
   }
 
+  // Collapse catalog rows that are the same tradeable item. The catalog lists
+  // each Doppler as seven skins (Phase 1-4, Ruby, Sapphire, Black Pearl) while
+  // the market prices them under ONE name, so counting each row as its own
+  // outcome hands Doppler ~7x the weight of a single-row finish. Group by
+  // (name, wear), take the per-ROW probability of each group (they are equal by
+  // construction), then renormalise — which restores one share per distinct
+  // item. Exact for single-collection contracts; for mixed contracts whose
+  // collections duplicate at different rates it is a close approximation.
+  const groups = new Map<string, { rows: number; p: number; o: (typeof structural.outcomes)[number] }>();
+  for (const o of structural.outcomes) {
+    const key = `${o.skin.name}|${o.outputWear}`;
+    const g = groups.get(key);
+    if (g) { g.rows++; g.p += o.probability; } else { groups.set(key, { rows: 1, p: o.probability, o }); }
+  }
+  const perItem = [...groups.values()].map((g) => ({ o: g.o, w: g.p / g.rows }));
+  const wsum = perItem.reduce((a, x) => a + x.w, 0) || 1;
+
   let ev = 0;
   let pricedProb = 0;
-  const outcomes: ValuedOutcome[] = structural.outcomes.map((o) => {
+  const outcomes: ValuedOutcome[] = perItem.map(({ o, w }) => {
+    const probability = w / wsum;
     const q = quote(o.skin.id, o.outputWear, isStatTrak, o.outputFloat);
     const bidNet = q ? q.bid_net : null;
     if (bidNet != null) {
-      ev += o.probability * bidNet;
-      pricedProb += o.probability;
+      ev += probability * bidNet;
+      pricedProb += probability;
     }
     return {
       skinId: o.skin.id,
       name: o.skin.name,
-      probability: o.probability,
+      probability,
       wear: o.outputWear,
       float: o.outputFloat,
       bidNet,
     };
-  });
+  }).sort((a, b) => b.probability - a.probability);
 
   let cost = 0;
   let buyCost = 0;
