@@ -22,7 +22,16 @@
 // by that exact delta — so the ranking is correct even though the generator is
 // heuristic. A provably-optimal min-cost-hits-a-float-bracket solver is a future
 // refinement. Contracts may be single-collection or MIXED (pooled across a
-// tier); still v1 on the standard x10 size (the x5 knife contract is unbuilt).
+// tier), and either the standard x10 or the x5 Covert->knife contract.
+//
+// KNOWN DEFECT (knife contracts): the catalog lists each Doppler as seven
+// separate skins (Phase 1-4, Ruby, Sapphire, Black Pearl) while Steam prices
+// them under ONE market name, so all seven carry the same price. valueContract
+// treats each row as its own outcome, which hands Doppler ~3.5x its true
+// probability weight and, because Doppler is the expensive finish, inflates a
+// Chroma 2 knife contract's EV by 2.14x (measured). Fix is to merge outcomes by
+// market name before weighting. Until then, treat any Extraordinary-output EV as
+// an overestimate.
 
 import { computeTradeup, floatToWear } from "@/lib/tradeup";
 import { RARITY_ORDER, WEAR_RANGES, type Rarity, type Skin, type Wear } from "@/types/cs2";
@@ -58,7 +67,7 @@ export interface ContractSlot {
 // A structural contract — produced without touching prices.
 export interface CandidateContract {
   tier: Rarity;
-  size: number; // 10 (standard). ×5 knife contract: later slice.
+  size: number; // 10 (standard) or 5 (Covert -> knife/glove contract)
   collectionId: string;
   collectionName: string;
   slots: ContractSlot[];
@@ -88,17 +97,29 @@ export interface ValuedContract {
   usesOwned: number; // slots drawn from the holder's inventory (0 = pure speculation)
 }
 
-// Tiers that can be an INPUT (nextRarity returns null for the top two tiers, so
-// Covert/Contraband/Extraordinary can't lead a contract).
+// Tiers that can be an INPUT. nextRarity returns null only for the TOP TWO tiers
+// (Extraordinary, Contraband), so Covert is tradeable and leads the x5 contract.
 const TRADEABLE_TIERS = new Set<Rarity>([
   "Consumer Grade",
   "Industrial Grade",
   "Mil-Spec Grade",
   "Restricted",
   "Classified",
+  // Covert leads the ×5 knife contract, whose output tier is Extraordinary
+  // (knives and gloves). nextRarity() has always supported it; leaving it out of
+  // this set made every red in an inventory invisible to the planner.
+  "Covert",
 ]);
 const EXCLUDED_COLLECTIONS = new Set(["Limited Edition Item"]);
 const STANDARD_SIZE = 10;
+const KNIFE_SIZE = 5;
+
+/** Contract size for a tier: the Covert→knife contract takes 5 inputs, every
+ *  other tier takes 10. computeTradeup already accepts both and uses the actual
+ *  input count as the probability denominator. */
+function contractSize(tier: Rarity): number {
+  return tier === "Covert" ? KNIFE_SIZE : STANDARD_SIZE;
+}
 
 // The skin's first real (tradeable, non-excluded) collection. v1 treats a skin
 // as belonging to one collection; mixed-collection contracts are a later slice.
@@ -328,13 +349,14 @@ function buildCandidates(
     picks: Consumable[],
     buy: { skinId: string; float: number } | null,
   ): CandidateContract | null => {
-    const chosen = picks.slice(0, STANDARD_SIZE);
+    const size = contractSize(group.tier);
+    const chosen = picks.slice(0, size);
     const slots: ContractSlot[] = chosen.map((c) => ({
       skinId: c.h.skinId,
       float: c.h.float,
       owned: true,
     }));
-    const need = STANDARD_SIZE - slots.length;
+    const need = size - slots.length;
     if (need > 0) {
       if (!buy) return null; // can't complete this contract
       for (let i = 0; i < need; i++) slots.push({ skinId: buy.skinId, float: buy.float, owned: false });
@@ -350,7 +372,7 @@ function buildCandidates(
       : null;
     return {
       tier: group.tier,
-      size: STANDARD_SIZE,
+      size,
       collectionId: group.collectionId ?? "*mixed*",
       collectionName: mixed ? `Mixed (${distinct!.size} collections)` : group.collectionName,
       slots,
@@ -395,6 +417,7 @@ function buildExposureCandidates(
 ): CandidateContract[] {
   const outTier = nextTier(tier);
   if (!outTier) return [];
+  const size = contractSize(tier);
 
   // Collections at this tier we can actually buy into, with what a roll is worth.
   const cols = new Map<string, { id: string; name: string }>();
@@ -437,12 +460,12 @@ function buildExposureCandidates(
 
   const out: CandidateContract[] = [];
   for (const r of rich) {
-    for (let k = 1; k <= STANDARD_SIZE; k++) {
-      if (r.c.id === filler.c.id && k !== STANDARD_SIZE) continue; // degenerate
+    for (let k = 1; k <= size; k++) {
+      if (r.c.id === filler.c.id && k !== size) continue; // degenerate
       const slots: ContractSlot[] = [];
       for (let i = 0; i < k; i++) slots.push({ skinId: r.buy.skinId, float: r.buy.float, owned: false });
       // fill the remainder with owned items first (free exposure), then buys
-      const need = STANDARD_SIZE - k;
+      const need = size - k;
       for (let i = 0; i < need; i++) {
         const o = ownedFiller[i];
         if (o) slots.push({ skinId: o.h.skinId, float: o.h.float, owned: true });
@@ -456,9 +479,9 @@ function buildExposureCandidates(
       );
       out.push({
         tier,
-        size: STANDARD_SIZE,
+        size,
         collectionId: "*split*",
-        collectionName: `${k}/10 ${r.c.name}${distinct.size > 1 ? ` + ${distinct.size - 1} more` : ""}`,
+        collectionName: `${k}/${size} ${r.c.name}${distinct.size > 1 ? ` + ${distinct.size - 1} more` : ""}`,
         slots,
         buys: slots.filter((sl) => !sl.owned).length,
       });
@@ -510,6 +533,7 @@ function buildSplitCandidates(
 ): CandidateContract[] {
   const outTier = nextTier(tier);
   if (!outTier) return [];
+  const size = contractSize(tier);
 
   // mean output value per collection, cached
   const meanByCol = new Map<string, number>();
@@ -537,7 +561,7 @@ function buildSplitCandidates(
     if (!buy || mean <= 0) continue;
     sources.push({
       collectionId: c.id, collectionName: c.name, skinId: buy.skinId, float: buy.float,
-      owned: false, cost: buy.ask, marginal: mean / STANDARD_SIZE - buy.ask, available: Infinity,
+      owned: false, cost: buy.ask, marginal: mean / size - buy.ask, available: Infinity,
     });
   }
 
@@ -553,7 +577,7 @@ function buildSplitCandidates(
     if (mean <= 0) continue;
     sources.push({
       collectionId: c.id, collectionName: c.name, skinId: h.skinId, float: h.float,
-      owned: true, cost: q.bid_net, marginal: mean / STANDARD_SIZE - q.bid_net, available: 1,
+      owned: true, cost: q.bid_net, marginal: mean / size - q.bid_net, available: 1,
     });
   }
   if (!sources.length) return [];
@@ -565,13 +589,13 @@ function buildSplitCandidates(
     );
     const slots: ContractSlot[] = [];
     for (const src of ranked) {
-      let n = src.available === Infinity ? STANDARD_SIZE - slots.length : src.available;
-      while (n-- > 0 && slots.length < STANDARD_SIZE) {
+      let n = src.available === Infinity ? size - slots.length : src.available;
+      while (n-- > 0 && slots.length < size) {
         slots.push({ skinId: src.skinId, float: src.float, owned: src.owned });
       }
-      if (slots.length >= STANDARD_SIZE) break;
+      if (slots.length >= size) break;
     }
-    if (slots.length < STANDARD_SIZE) return null;
+    if (slots.length < size) return null;
     const names = new Set(
       slots.flatMap((sl) => {
         const c = primaryCollection(skinById.get(sl.skinId)!);
@@ -580,7 +604,7 @@ function buildSplitCandidates(
     );
     const lead = [...names][0] ?? "Mixed";
     return {
-      tier, size: STANDARD_SIZE, collectionId: "*split*",
+      tier, size, collectionId: "*split*",
       collectionName: names.size > 1 ? `${lead} + ${names.size - 1} more` : lead,
       slots, buys: slots.filter((sl) => !sl.owned).length,
     };
