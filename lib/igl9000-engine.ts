@@ -237,24 +237,49 @@ function buyMenu(
   return menu;
 }
 
-// Pick a buy for a steering direction. "cheap" = lowest ask (bracket mid float);
-// "low"/"high" = the cheapest option in the lowest/highest priced wear bracket,
-// bought at that bracket's edge to move the average as far as it goes.
+// Pick a buy for a steering direction. Steering chooses a WEAR BRACKET, never an
+// extreme float inside one: you can place a market order for "AXIA
+// (Battle-Scarred)" and fill it nine times, but nine copies at float ~0.999 are
+// a scavenger hunt, and the quoted bracket price does not apply to them. So every
+// bought slot is the SAME skin in the SAME condition, priced at the bracket
+// midpoint — the float the quote actually describes.
+//   cheap = lowest ask of any bracket;  low/high = cheapest in the lowest/highest
+//   priced bracket, which is how you pull the output float down or up for real.
 function pickBuy(
   menu: BuyOption[],
   mode: "cheap" | "low" | "high",
 ): { skinId: string; float: number; ask: number } | null {
   if (!menu.length) return null;
-  if (mode === "cheap") {
-    const b = menu.reduce((a, x) => (x.ask < a.ask ? x : a));
-    return { skinId: b.skinId, float: (b.min + b.max) / 2, ask: b.ask };
+  const b =
+    mode === "cheap"
+      ? menu.reduce((a, x) => (x.ask < a.ask ? x : a))
+      : mode === "low"
+        ? menu[0] // lowest wear bracket present
+        : menu[menu.length - 1]; // highest wear bracket present
+  return { skinId: b.skinId, float: (b.min + b.max) / 2, ask: b.ask };
+}
+
+// Representative value of a collection's outputs: what one roll into C is worth
+// on average, evaluated at the output float a mid-float contract produces. This
+// is the number the cross-collection split ranks by.
+function meanOutputValue(
+  collectionId: string,
+  outTier: Rarity,
+  allSkins: Skin[],
+  quote: PriceProvider,
+  isStatTrak: boolean,
+): { mean: number; k: number } {
+  const outs = allSkins.filter(
+    (s) => s.rarity.name === outTier && !s.souvenir && s.collections.some((c) => c.id === collectionId),
+  );
+  if (!outs.length) return { mean: 0, k: 0 };
+  let total = 0;
+  for (const o of outs) {
+    const f = o.min_float + 0.5 * (o.max_float - o.min_float); // mid-float contract
+    const q = quote(o.id, floatToWear(f), isStatTrak, f);
+    total += q ? q.bid_net : 0;
   }
-  if (mode === "low") {
-    const b = menu[0]; // lowest wear bracket present
-    return { skinId: b.skinId, float: b.min, ask: b.ask };
-  }
-  const b = menu[menu.length - 1]; // highest wear bracket present
-  return { skinId: b.skinId, float: Math.max(b.min, b.max - EPS), ask: b.ask };
+  return { mean: total / outs.length, k: outs.length };
 }
 
 interface Consumable {
@@ -346,6 +371,100 @@ function buildCandidates(
   return candidates.filter((c): c is CandidateContract => c !== null);
 }
 
+// Cross-collection split (§3.2). In a mixed contract each output of collection C
+// carries probability n_C / (10 · k_C) — so the slots you give a collection ARE
+// your exposure to it. One slot in a rich collection buys a tenth of its odds for
+// a tenth of the inputs, which means you never need ten expensive inputs to get a
+// shot at an expensive output: pad the rest with the cheapest filler you can buy
+// or already own.
+//
+// The engine sweeps that trade-off directly: for each promising collection R,
+// try every split k = 1..10 of "k slots of R, the rest filler", and let
+// valueContract price it. The sweep is tiny (a few collections × 10 splits) and
+// it is the only strategy that can express partial exposure — cost-floor and
+// float-steering both treat every slot as interchangeable.
+function buildExposureCandidates(
+  tier: Rarity,
+  owned: Holding[],
+  skinById: Map<string, Skin>,
+  quote: PriceProvider,
+  isStatTrak: boolean,
+  allSkins: Skin[],
+): CandidateContract[] {
+  const outTier = nextTier(tier);
+  if (!outTier) return [];
+
+  // Collections at this tier we can actually buy into, with what a roll is worth.
+  const cols = new Map<string, { id: string; name: string }>();
+  for (const s of skinById.values()) {
+    if (s.rarity.name !== tier || s.souvenir) continue;
+    if (!hasNextTierOutput(s, allSkins)) continue;
+    const c = primaryCollection(s);
+    if (c) cols.set(c.id, c);
+  }
+
+  const ranked = [...cols.values()]
+    .map((c) => {
+      const buy = pickBuy(buyMenu(tier, c.id, skinById, quote, isStatTrak, allSkins), "cheap");
+      const { mean, k } = meanOutputValue(c.id, outTier, allSkins, quote, isStatTrak);
+      return { c, buy, mean, k };
+    })
+    .filter((x) => x.buy && x.k > 0 && x.mean > 0) as {
+    c: { id: string; name: string };
+    buy: { skinId: string; float: number; ask: number };
+    mean: number;
+    k: number;
+  }[];
+  if (ranked.length < 2) return []; // nothing to split across
+
+  // Richest by expected roll value; cheapest by what a slot costs to fill.
+  const rich = [...ranked].sort((a, b) => b.mean - a.mean).slice(0, 3);
+  const filler = [...ranked].sort((a, b) => a.buy.ask - b.buy.ask)[0];
+
+  // Owned items usable as filler: cheaper than buying the filler, and eligible.
+  const ownedFiller = owned
+    .map((h) => {
+      const skin = skinById.get(h.skinId);
+      if (!skin || !hasNextTierOutput(skin, allSkins)) return null;
+      const q = quote(h.skinId, floatToWear(h.float), isStatTrak, h.float);
+      if (!q || q.bid_net > filler.buy.ask + EPS) return null;
+      return { h, cost: q.bid_net };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a!.cost - b!.cost) as { h: Holding; cost: number }[];
+
+  const out: CandidateContract[] = [];
+  for (const r of rich) {
+    for (let k = 1; k <= STANDARD_SIZE; k++) {
+      if (r.c.id === filler.c.id && k !== STANDARD_SIZE) continue; // degenerate
+      const slots: ContractSlot[] = [];
+      for (let i = 0; i < k; i++) slots.push({ skinId: r.buy.skinId, float: r.buy.float, owned: false });
+      // fill the remainder with owned items first (free exposure), then buys
+      const need = STANDARD_SIZE - k;
+      for (let i = 0; i < need; i++) {
+        const o = ownedFiller[i];
+        if (o) slots.push({ skinId: o.h.skinId, float: o.h.float, owned: true });
+        else slots.push({ skinId: filler.buy.skinId, float: filler.buy.float, owned: false });
+      }
+      const distinct = new Set(
+        slots.flatMap((sl) => {
+          const c = primaryCollection(skinById.get(sl.skinId)!);
+          return c ? [c.name] : [];
+        }),
+      );
+      out.push({
+        tier,
+        size: STANDARD_SIZE,
+        collectionId: "*split*",
+        collectionName: `${k}/10 ${r.c.name}${distinct.size > 1 ? ` + ${distinct.size - 1} more` : ""}`,
+        slots,
+        buys: slots.filter((sl) => !sl.owned).length,
+      });
+    }
+  }
+  return out;
+}
+
 // §3.2 — enumerate candidate contracts from holdings. Groups owned items by
 // (tier, collection), then emits several assignment-optimized candidates per
 // group (see buildCandidates). A group whose collection has no next-tier output
@@ -404,7 +523,10 @@ export function enumerateContracts(
         allSkins,
       ),
     );
-  return [...single, ...mixed];
+  const exposure = [...byTier.entries()].flatMap(([tier, owned]) =>
+    buildExposureCandidates(tier, owned, skinById, quote, isStatTrak, allSkins),
+  );
+  return [...single, ...mixed, ...exposure];
 }
 
 // §3.5 — the greedy planner. Value every candidate, keep those that are
