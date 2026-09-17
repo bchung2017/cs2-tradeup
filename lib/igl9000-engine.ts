@@ -130,7 +130,7 @@ export function valueContract(
   let ev = 0;
   let pricedProb = 0;
   const outcomes: ValuedOutcome[] = structural.outcomes.map((o) => {
-    const q = quote(o.skin.id, o.outputWear, isStatTrak);
+    const q = quote(o.skin.id, o.outputWear, isStatTrak, o.outputFloat);
     const bidNet = q ? q.bid_net : null;
     if (bidNet != null) {
       ev += o.probability * bidNet;
@@ -150,7 +150,7 @@ export function valueContract(
   let buyCost = 0;
   let pricedSlots = 0;
   for (const s of contract.slots) {
-    const q = quote(s.skinId, floatToWear(s.float), isStatTrak);
+    const q = quote(s.skinId, floatToWear(s.float), isStatTrak, s.float);
     if (!q) continue;
     pricedSlots++;
     cost += s.owned ? q.bid_net : q.ask;
@@ -196,7 +196,10 @@ function buyMenu(
     for (const skin of skinById.values()) {
       if (skin.rarity.name !== tier || skin.souvenir) continue;
       if (!skin.collections.some((c) => c.id === collectionId)) continue;
-      const q = quote(skin.id, wr.wear, isStatTrak);
+      // Menu prices the bracket at its midpoint — a representative float for
+      // *selection*. The exact float's cost is recomputed in valueContract,
+      // which stays the source of truth.
+      const q = quote(skin.id, wr.wear, isStatTrak, (wr.min + wr.max) / 2);
       if (!q) continue;
       if (!best || q.ask < best.ask || (q.ask === best.ask && skin.id < best.skinId)) {
         best = { skinId: skin.id, wear: wr.wear, min: wr.min, max: wr.max, ask: q.ask };
@@ -256,7 +259,7 @@ function buildCandidates(
   group.owned.forEach((h, idx) => {
     const skin = skinById.get(h.skinId);
     if (!skin) return;
-    const q = quote(h.skinId, floatToWear(h.float), isStatTrak);
+    const q = quote(h.skinId, floatToWear(h.float), isStatTrak, h.float);
     if (!q) return;
     if (q.bid_net > buyFloorAsk + EPS) return; // too valuable to burn
     consumable.push({ h, cost: q.bid_net, norm: normalizeFloat(h.float, skin.min_float, skin.max_float), idx });
