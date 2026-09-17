@@ -561,20 +561,30 @@ function buildSplitCandidates(
 
   const sources: SlotSource[] = [];
 
-  // buyable source per collection (uniform condition, cheapest bracket)
-  const cols = new Map<string, { id: string; name: string }>();
-  for (const s of skinById.values()) {
-    if (s.rarity.name !== tier || s.souvenir || !hasNextTierOutput(s, allSkins)) continue;
-    const c = primaryCollection(s);
-    if (c) cols.set(c.id, c);
-  }
-  for (const c of cols.values()) {
-    const buy = pickBuy(buyMenu(tier, c.id, skinById, quote, isStatTrak, allSkins), "cheap");
+  // One buyable source per SKIN, not per collection. Collapsing a collection to
+  // its single cheapest skin is what kept contracts single-collection: the greedy
+  // then had one unlimited source at the top of the ranking and filled all ten
+  // slots from it. A contract may legally draw all ten slots from ten different
+  // collections, and that is where the interesting combinations live, so the pool
+  // has to be the whole buyable tier.
+  for (const sk of skinById.values()) {
+    if (sk.rarity.name !== tier || sk.souvenir || !hasNextTierOutput(sk, allSkins)) continue;
+    const c = primaryCollection(sk);
+    if (!c) continue;
     const mean = meanOf(c.id);
-    if (!buy || mean <= 0) continue;
+    if (mean <= 0) continue;
+    // cheapest priced condition for this specific skin
+    let best: { wear: Wear; float: number; ask: number } | null = null;
+    for (const wr of WEAR_RANGES) {
+      const mid = (wr.min + wr.max) / 2;
+      const q = quote(sk.id, wr.wear, isStatTrak, mid);
+      if (!q) continue;
+      if (!best || q.ask < best.ask) best = { wear: wr.wear, float: mid, ask: q.ask };
+    }
+    if (!best) continue;
     sources.push({
-      collectionId: c.id, collectionName: c.name, skinId: buy.skinId, float: buy.float,
-      owned: false, cost: buy.ask, marginal: mean / size - buy.ask, available: Infinity,
+      collectionId: c.id, collectionName: c.name, skinId: sk.id, float: best.float,
+      owned: false, cost: best.ask, marginal: mean / size - best.ask, available: Infinity,
     });
   }
 
@@ -595,14 +605,19 @@ function buildSplitCandidates(
   }
   if (!sources.length) return [];
 
-  // Greedy fill by marginal value — the optimum of the linear program above.
-  const fill = (pool: SlotSource[]): CandidateContract | null => {
+  // Greedy fill by marginal value — the optimum of the linear program above,
+  // subject to `cap`: how many copies of ONE skin a contract may use. Without a
+  // cap the optimum is always ten copies of the single best source, which is both
+  // degenerate and a liquidity fiction (the quoted ask is one listing, not ten).
+  // Capping forces the fill down the ranking into other skins and other
+  // collections, which is how a genuine multi-collection contract appears.
+  const fill = (pool: SlotSource[], cap = Infinity): CandidateContract | null => {
     const ranked = [...pool].sort(
       (a, b) => b.marginal - a.marginal || a.cost - b.cost || (a.skinId < b.skinId ? -1 : 1),
     );
     const slots: ContractSlot[] = [];
     for (const src of ranked) {
-      let n = src.available === Infinity ? size - slots.length : src.available;
+      let n = src.available === Infinity ? Math.min(cap, size - slots.length) : Math.min(src.available, cap);
       while (n-- > 0 && slots.length < size) {
         slots.push({ skinId: src.skinId, float: src.float, owned: src.owned });
       }
@@ -624,14 +639,17 @@ function buildSplitCandidates(
   };
 
   const out: CandidateContract[] = [];
-  const best = fill(sources);
-  if (best) out.push(best);
-  // Same optimum restricted to contracts that actually consume something you own
-  // — a pure-buy contract is speculation, not a move on your inventory.
   const ownedSources = sources.filter((s) => s.owned);
-  if (ownedSources.length) {
-    const forced = fill([...ownedSources.sort((a, b) => b.marginal - a.marginal).slice(0, 1), ...sources]);
-    if (forced) out.push(forced);
+  const ownedFirst = ownedSources.sort((a, b) => b.marginal - a.marginal).slice(0, 1);
+  // cap 1 spreads across ten distinct skins (often ten collections); higher caps
+  // concentrate. Emit them all and let valueContract price which one actually wins.
+  for (const cap of [1, 2, 3, 5, size]) {
+    const best = fill(sources, cap);
+    if (best) out.push(best);
+    if (ownedFirst.length) {
+      const forced = fill([...ownedFirst, ...sources], cap);
+      if (forced) out.push(forced);
+    }
   }
   return out;
 }
