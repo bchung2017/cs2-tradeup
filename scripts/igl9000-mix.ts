@@ -160,7 +160,7 @@ for (const tier of tiers) {
     const cs = colsOf(s);
     if (s.rarity.name === tier) {
       if (cs.length !== 1) continue; // multi-collection inputs split weight; keep the model exact
-      const e = byCol.get(cs[0].id) ?? { name: cs[0].name, inputs: [], outputs: new Map() };
+      const e = byCol.get(cs[0].id) ?? { name: cs[0].name, inputs: [] as Skin[], outputs: new Map<string, Skin>() };
       e.inputs.push(s);
       byCol.set(cs[0].id, e);
     }
