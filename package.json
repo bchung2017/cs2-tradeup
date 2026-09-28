@@ -10,6 +10,7 @@
     "migrate-db": "tsx scripts/migrate-sqlite-to-pg.ts",
     "igl9000-check": "tsx scripts/igl9000-check.ts",
     "igl9000-gamble": "tsx scripts/igl9000-gamble.ts",
+    "igl9000-mix": "tsx scripts/igl9000-mix.ts",
     "sync-prices": "tsx scripts/sync-prices.ts",
     "admin": "tsx scripts/admin-server.ts",
     "typecheck": "tsc --noEmit"
