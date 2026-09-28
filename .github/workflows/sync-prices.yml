@@ -1,0 +1,65 @@
+name: Sync prices
+
+# Refresh public/data/prices.json from the CSGOTrader bulk feeds and commit the
+# result. Exists so the sync does not require a developer's laptop: the admin
+# server binds to 127.0.0.1 and Render's filesystem is ephemeral, so the only
+# durable place prices live is this repo. A GitHub runner has open egress, which
+# a Claude Code cloud container may not.
+#
+# Trigger it from the GitHub mobile app or web UI: Actions -> Sync prices ->
+# "Run workflow". NOTE: GitHub only shows that button for workflows that exist
+# on the DEFAULT branch, so this file has to reach main before the button appears.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-price keys that already have a source (leave on unless testing)"
+        type: boolean
+        default: true
+  schedule:
+    # Mondays 06:17 UTC. Off-the-hour on purpose: scheduled jobs at :00 queue
+    # behind everyone else's and get delayed.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  # Never let two syncs race to commit the same file.
+  group: sync-prices
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      # `github.event.inputs.force` is empty on a schedule run, so the default
+      # is --force and only an explicit "false" from the UI turns it off.
+      - name: Market-average sync
+        run: npx tsx scripts/sync-prices.ts ${{ github.event.inputs.force == 'false' && ' ' || '--force' }}
+
+      - name: Commit if prices moved
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- public/data; then
+            echo "no price changes — nothing to commit"
+            exit 0
+          fi
+          # Coverage line in the job log, so a bad run is visible without
+          # downloading the diff.
+          node -e "const m=require('./public/data/prices.meta.json');console.log('meta:',JSON.stringify(m))"
+          git add public/data/prices.json public/data/prices.meta.json
+          git commit -m "chore(prices): market-average sync $(date -u +%Y-%m-%d)"
+          git push origin HEAD:${{ github.ref_name }}
