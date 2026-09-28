@@ -2,7 +2,7 @@
  * IGL-9000 — mixed-collection, float-steered trade-up sweep.
  *
  *   npx tsx scripts/igl9000-mix.ts [--top 25] [--min-cost 1] [--max-cost 50]
- *                                  [--float-skew 0.2] [--tier "Mil-Spec Grade"]
+ *                                  [--float-skew 0.2] [--tier "Mil-Spec Grade"] [--sort rtp|pwin]
  *
  * The plain catalog sweep (igl9000-gamble.ts) builds one-collection contracts at
  * mid-bracket floats. Profitable budget trade-ups use two levers it never pulls:
@@ -26,7 +26,7 @@
 import { RARITY_ORDER, WEAR_RANGES, type PriceTable, type Rarity, type Skin } from "@/types/cs2";
 import { loadPrices, loadSkins } from "@/lib/data";
 import { marketAvgPriceProvider, type PriceProvider } from "@/lib/igl9000-quote";
-import { valueContract, type CandidateContract } from "@/lib/igl9000-engine";
+import { valueContract, type CandidateContract, type ValuedContract } from "@/lib/igl9000-engine";
 import { floatToWear } from "@/lib/tradeup";
 
 const argv = process.argv.slice(2);
@@ -41,6 +41,7 @@ const FLOAT_SKEW = Number(arg("float-skew") ?? 0.2);
 const ONLY_TIER = arg("tier");
 const MAX_SPREAD = Number(arg("max-spread") ?? 2);
 const MIN_DEPTH = Number(arg("min-depth") ?? 0.1);
+const SORT = arg("sort") === "pwin" ? "pwin" : "rtp";
 
 const EXCLUDED = "Limited Edition Item";
 const G = 1000; // normalized-float grid resolution
@@ -226,7 +227,26 @@ function toContract(h: Hit): CandidateContract {
 
 // One row per unordered collection pair: A+B and B+A are the same contract family.
 const seen = new Set<string>();
-const seenTop = new Set<string>();
+const seenWins = new Set<string>();
+const norm = (f: number, s: Skin) => (f - s.min_float) / (s.max_float - s.min_float);
+const inputColIds = (v: ValuedContract) =>
+  new Set(v.contract.slots.flatMap((sl) => colsOf(skinById.get(sl.skinId)!).map((c) => c.id)));
+
+// Inputs are bought as "≤ cap", so a real fill lands anywhere between the bottom
+// of the cap's wear bracket and the cap. That brackets the contract's mean
+// normalized float, and with it every outcome's float.
+function floatWindow(v: ValuedContract): { tLo: number; tHi: number } {
+  let lo = 0, hi = 0;
+  for (const sl of v.contract.slots) {
+    const sk = skinById.get(sl.skinId)!;
+    const br = WEAR_RANGES.find((w) => w.wear === floatToWear(sl.float))!;
+    lo += norm(Math.max(br.min, sk.min_float), sk);
+    hi += norm(sl.float, sk);
+  }
+  const n = v.contract.slots.length;
+  return { tLo: lo / n, tHi: hi / n };
+}
+
 const verified = hits
   .sort((a, b) => b.ev / b.cost - a.ev / a.cost)
   .filter((h) => {
@@ -240,43 +260,76 @@ const verified = hits
   .filter((x) => x.v && !x.v.approx && x.v.delta > 0)
   .map((x) => {
     const v = x.v!;
-    const pWin = v.outcomes.filter((o) => (o.bidNet ?? 0) > v.cost).reduce((a, o) => a + o.probability, 0);
+    const wins = v.outcomes.filter((o) => (o.bidNet ?? 0) > v.cost);
+    const pWin = wins.reduce((a, o) => a + o.probability, 0);
     const top = [...v.outcomes].sort((a, b) => (b.bidNet ?? 0) - (a.bidNet ?? 0))[0];
-    const shockedEv = v.ev - top.probability * (top.bidNet ?? 0) * SHOCK;
-    return { ...x, v, pWin, top, robust: shockedEv > v.cost, rtp: v.ev / v.cost };
+    // Shock EVERY winning outcome, not just the top one: a contract carried by
+    // several profitable outcomes should survive a broad drop, one carried by a
+    // single jackpot should not.
+    const shockedEv = v.ev - wins.reduce((a, o) => a + o.probability * (o.bidNet ?? 0), 0) * SHOCK;
+    return { ...x, v, wins, pWin, top, robust: shockedEv > v.cost, rtp: v.ev / v.cost };
   })
-  .sort((a, b) => b.rtp - a.rtp)
-  // One row per jackpot: a strong collection paired with twenty interchangeable
-  // fillers is one opportunity, not twenty.
+  .sort((a, b) => (SORT === "pwin" ? b.pWin - a.pWin || b.rtp - a.rtp : b.rtp - a.rtp))
+  // One row per set of winning outcomes: a strong collection paired with twenty
+  // interchangeable fillers is one opportunity, not twenty.
   .filter((x) => {
-    const key = `${x.h.tier}|${x.top.name}|${x.top.wear}`;
-    if (seenTop.has(key)) return false;
-    seenTop.add(key);
+    const key = `${x.h.tier}|${x.wins.map((o) => `${o.name}|${o.wear}`).sort().join(",")}`;
+    if (seenWins.has(key)) return false;
+    seenWins.add(key);
     return true;
   })
   .slice(0, TOP);
 
 const money = (n: number) => `$${n.toFixed(2)}`;
-const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
+const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 const short = (n: string) => n.replace(/^The /, "").replace(/ Collection$/, "");
 const WEAR_ABBR: Record<string, string> = { "Factory New": "FN", "Minimal Wear": "MW", "Field-Tested": "FT", "Well-Worn": "WW", "Battle-Scarred": "BS" };
+const W = (f: number) => WEAR_ABBR[floatToWear(f)];
 
-console.log(`\nIGL-9000 · mixed-collection float-steered sweep   float-skew ${FLOAT_SKEW}   min-depth ${MIN_DEPTH}   max-spread ${MAX_SPREAD}×   cost $${MIN_COST}–$${MAX_COST}`);
-console.log(`  collection pairs scanned ${pairsScanned} → +EV hits ${hits.length} → engine-verified shown ${verified.length}\n`);
+console.log(`\nIGL-9000 · mixed-collection float-steered sweep   float-skew ${FLOAT_SKEW}   min-depth ${MIN_DEPTH}   max-spread ${MAX_SPREAD}×   cost $${MIN_COST}–$${MAX_COST}   sort ${SORT}`);
+console.log(`  collection pairs scanned ${pairsScanned} → +EV hits ${hits.length} → engine-verified shown ${verified.length}`);
+console.log(`  outcome floats are a range: inputs bought "≤ cap" can fill anywhere from the bottom of that wear grade up to the cap.`);
+console.log(`  Payouts are valued at the WORST end (inputs at the cap); a lower fill can only improve wear.\n`);
 
-verified.forEach(({ h, v, pWin, top, robust, rtp }, i) => {
+verified.forEach(({ h, v, wins, pWin, robust, rtp }, i) => {
+  const { tLo, tHi } = floatWindow(v);
+  const cols = inputColIds(v);
+
   const groups = new Map<string, { n: number; f: number }>();
-  for (const s of v.contract.slots) {
-    const g = groups.get(s.skinId) ?? { n: 0, f: s.float };
+  for (const sl of v.contract.slots) {
+    const g = groups.get(sl.skinId) ?? { n: 0, f: sl.float };
     g.n++;
-    groups.set(s.skinId, g);
+    groups.set(sl.skinId, g);
   }
-  const inputs = [...groups].map(([id, g]) => {
-    const s = skinById.get(id)!;
-    return `${g.n}× ${s.name} ${WEAR_ABBR[floatToWear(g.f)]} ≤${g.f.toFixed(3)} (${short(colsOf(s)[0].name)})`;
-  });
-  console.log(`${String(i + 1).padStart(2)}. ${h.tier} → ${v.outputRarity}   cost ${money(v.cost)}   EV ${money(v.ev)}   RTP ${pct(rtp)}   P(profit) ${pct(pWin)}${robust ? "" : "   [fragile: −30% on top outcome kills it]"}`);
-  for (const line of inputs) console.log(`      ${line}`);
-  console.log(`      top ${top.name} ${WEAR_ABBR[top.wear]} ${money(top.bidNet ?? 0)} @ ${pct(top.probability)}`);
+
+  const winValue = wins.reduce((a, o) => a + o.probability * (o.bidNet ?? 0), 0) / (pWin || 1);
+  console.log(
+    `${String(i + 1).padStart(2)}. ${h.tier} → ${v.outputRarity}   cost ${money(v.cost)}   EV ${money(v.ev)}   RTP ${(rtp * 100).toFixed(0)}%` +
+      `   P(profit) ${pct(pWin)} across ${wins.length} of ${v.outcomes.length} outcomes   avg win ${money(winValue)}` +
+      (robust ? "" : "   [fragile: −30% on the winners kills it]"),
+  );
+  console.log(`    inputs (avg normalized float ${tLo.toFixed(4)}–${tHi.toFixed(4)})`);
+  for (const [id, g] of groups) {
+    const sk = skinById.get(id)!;
+    const br = WEAR_RANGES.find((w) => w.wear === floatToWear(g.f))!;
+    const lo = Math.max(br.min, sk.min_float);
+    console.log(
+      `      ${String(g.n).padStart(2)}× ${sk.name.padEnd(32)} ${WEAR_ABBR[br.wear]} ${lo.toFixed(3)}–${g.f.toFixed(3)}` +
+        `   ${money(quote(id, br.wear, false, g.f)!.ask)} ea   [${short(colsOf(sk)[0].name)}]`,
+    );
+  }
+  console.log(`    outcomes`);
+  for (const o of [...v.outcomes].sort((a, b) => (b.bidNet ?? 0) - (a.bidNet ?? 0))) {
+    const sk = skinById.get(o.skinId)!;
+    const fLo = sk.min_float + tLo * (sk.max_float - sk.min_float);
+    const fHi = sk.min_float + tHi * (sk.max_float - sk.min_float);
+    const wear = W(fLo) === W(fHi) ? W(fHi) : `${W(fLo)}/${W(fHi)}`;
+    const col = colsOf(sk).find((c) => cols.has(c.id)) ?? colsOf(sk)[0];
+    const win = (o.bidNet ?? 0) > v.cost;
+    console.log(
+      `      ${win ? "WIN " : "    "}${pct(o.probability).padStart(6)}  ${money(o.bidNet ?? 0).padStart(8)}  ` +
+        `${fLo.toFixed(4)}–${fHi.toFixed(4)} ${wear.padEnd(5)}  ${sk.name.padEnd(34)} [${short(col.name)}]`,
+    );
+  }
+  console.log("");
 });
-console.log("");
