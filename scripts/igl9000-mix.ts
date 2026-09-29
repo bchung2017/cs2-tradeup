@@ -4,6 +4,7 @@
  *   npx tsx scripts/igl9000-mix.ts [--top 25] [--min-cost 1] [--max-cost 50]
  *                                  [--float-skew 0.2] [--tier "Mil-Spec Grade"] [--sort rtp|pwin]
  *                                  [--venue third-party|steam] [--edge-mult 1] [--edge-band 0.03]
+ *                                  [--verify-steam K]   live-check the top K against Steam
  *
  * The plain catalog sweep (igl9000-gamble.ts) builds one-collection contracts at
  * mid-bracket floats. Profitable budget trade-ups use two levers it never pulls:
@@ -29,6 +30,8 @@ import { loadPrices, loadSkins } from "@/lib/data";
 import { marketAvgPriceProvider, steamPriceProvider, type PriceProvider } from "@/lib/igl9000-quote";
 import { valueContract, type CandidateContract, type ValuedContract } from "@/lib/igl9000-engine";
 import { floatToWear } from "@/lib/tradeup";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const arg = (k: string) => {
@@ -55,6 +58,7 @@ const EDGE_MULT = Number(arg("edge-mult") ?? 1);
 // Steam sold-price median; a sale nets price / 1.15. Never mix the two — a
 // Skinport-in, Steam-out contract is venue arbitrage, not a trade-up edge.
 const VENUE = arg("venue") === "steam" ? "steam" : "third-party";
+const VERIFY = Number(arg("verify-steam") ?? 0);
 const EDGE_BAND = Number(arg("edge-band") ?? 0.03);
 const edgeFactor = (dist: number) =>
   dist < EDGE_BAND ? EDGE_MULT : dist < 2 * EDGE_BAND ? EDGE_MULT - (EDGE_MULT - 1) * ((dist - EDGE_BAND) / EDGE_BAND) : 1;
@@ -76,8 +80,29 @@ const quote: PriceProvider = (id, wear, st, f) => {
   const src = prices[`${id}|${wear}|${st ? "st" : "norm"}`]?.sources;
   const v = src ? Object.values(src).filter((p): p is number => typeof p === "number" && p > 0) : [];
   if (v.length > 1 && Math.max(...v) / Math.min(...v) > MAX_SPREAD) return null;
+  if (!wearConsistent(id, wear, st)) return null;
   return baseQuote(id, wear, st, f);
 };
+
+// A single-source price has no second venue to check against, so check it
+// against the same skin's neighbouring wear instead. P90 | Glacier Mesh BS was
+// quoted $0.08 (Steam only) against WW $7.64; live Steam said $11.59.
+function venuePrice(id: string, wear: string, st: boolean): number | null {
+  const src = prices[`${id}|${wear}|${st ? "st" : "norm"}`]?.sources;
+  if (!src) return null;
+  if (VENUE === "steam") return typeof src.steam === "number" && src.steam > 0 ? src.steam : null;
+  const v = Object.entries(src).filter(([k, p]) => k !== "steam" && typeof p === "number" && p > 0).map(([, p]) => p as number);
+  return v.length ? Math.min(...v) : null;
+}
+function wearConsistent(id: string, wear: string, st: boolean): boolean {
+  const i = WEAR_RANGES.findIndex((w) => w.wear === wear);
+  const p = venuePrice(id, wear, st);
+  if (p == null || i < 0) return true;
+  const better = i > 0 ? venuePrice(id, WEAR_RANGES[i - 1].wear, st) : null;
+  if (better != null) return p >= better / 20 && p <= better * 3;
+  const worse = i < WEAR_RANGES.length - 1 ? venuePrice(id, WEAR_RANGES[i + 1].wear, st) : null;
+  return worse == null || p >= worse / 3;
+}
 
 const colsOf = (s: Skin) => s.collections.filter((c) => c.name !== EXCLUDED);
 
@@ -525,3 +550,88 @@ verified.forEach(({ h, v, wins, pWin, robust, rtp }, i) => {
   }
   console.log("");
 });
+
+// ── live Steam checkpoint ───────────────────────────────────────────────────
+// Re-price the top K contracts from Steam's priceoverview (per wear grade, not
+// per float). Checks every input and every outcome that matters (a winner, or
+// worth at least half the contract cost); the rest keep the model price.
+// Requests are spaced and cached for 6 h so repeat runs don't hit Steam again.
+// curl, not fetch: it honours the environment's HTTPS proxy.
+if (VERIFY > 0) {
+  const CACHE = "node_modules/.cache/igl9000-steam.json";
+  const TTL = 6 * 3600e3;
+  const GAP_MS = 3500;
+  const cache: Record<string, { at: number; lowest: number | null; median: number | null; volume: number }> =
+    existsSync(CACHE) ? JSON.parse(readFileSync(CACHE, "utf8")) : {};
+  let calls = 0;
+  const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  const money2 = (s?: string) => (s ? Number(s.replace(/[^0-9.]/g, "")) || null : null);
+  function live(name: string) {
+    const hit = cache[name];
+    if (hit && Date.now() - hit.at < TTL) return hit;
+    if (calls++ > 0) sleep(GAP_MS);
+    const url = `https://steamcommunity.com/market/priceoverview/?appid=730&currency=1&market_hash_name=${encodeURIComponent(name)}`;
+    let j: { success?: boolean; lowest_price?: string; median_price?: string; volume?: string } = {};
+    try {
+      j = JSON.parse(execFileSync("curl", ["-sS", "--max-time", "20", url], { encoding: "utf8" }));
+    } catch {
+      return null; // rate-limited or unreachable: fall back to the model price
+    }
+    const r = {
+      at: Date.now(),
+      lowest: money2(j.lowest_price),
+      median: money2(j.median_price),
+      volume: j.volume ? Number(j.volume.replace(/[^0-9]/g, "")) || 0 : 0,
+    };
+    cache[name] = r;
+    return r;
+  }
+
+  console.log(`\n── live Steam check: top ${Math.min(VERIFY, verified.length)} ${VENUE === "steam" ? "" : "(model is third-party; Steam shown for comparison) "}──`);
+  console.log(`  buy = Steam lowest listing × edge premium at the cap;  sell = Steam median (lowest if no recent sales) / 1.15\n`);
+  const rows = verified.slice(0, VERIFY).map(({ h, v }, i) => {
+    const lines: string[] = [];
+    const check = (label: string, sk: Skin, wear: string, model: number, f: number, side: "buy" | "sell") => {
+      const r = live(`${sk.name} (${wear})`);
+      const px = r ? (side === "buy" ? r.lowest ?? r.median : r.median ?? r.lowest) : null;
+      const val = px == null ? null : side === "buy" ? px * edgeFactor(gradeOf(sk, f).dist) : px / 1.15;
+      const diff = val == null ? null : val / model - 1;
+      lines.push(
+        `    ${label} ${`${sk.name} (${WEAR_ABBR[wear]})`.padEnd(40)} model ${money(model).padStart(8)}  live ${val == null ? "      —" : money(val).padStart(8)}` +
+          `${diff == null ? "" : `  ${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(0)}%`.padEnd(8)}` +
+          `${r ? `  vol24h ${r.volume}` : "  (no data)"}${diff != null && Math.abs(diff) > 0.25 ? "  ⚠" : ""}`,
+      );
+      return val ?? model;
+    };
+    let cost = 0;
+    const seenIn = new Map<string, number>();
+    for (const sl of v.contract.slots) {
+      const sk = skinById.get(sl.skinId)!;
+      const wear = floatToWear(sl.float);
+      const k = `${sl.skinId}|${wear}`;
+      if (!seenIn.has(k)) seenIn.set(k, check("in ", sk, wear, buyQuote(sl.skinId, wear, false, sl.float)!.ask, sl.float, "buy"));
+      cost += seenIn.get(k)!;
+    }
+    let ev = 0;
+    const liveOut: { p: number; val: number }[] = [];
+    for (const o of v.outcomes) {
+      const model = o.bidNet ?? 0;
+      const material = model > v.cost || model >= 0.5 * v.cost;
+      const val = material ? check("out", skinById.get(o.skinId)!, o.wear, model, o.float, "sell") : model;
+      ev += o.probability * val;
+      liveOut.push({ p: o.probability, val });
+    }
+    const pWin = liveOut.filter((x) => x.val > cost).reduce((a, x) => a + x.p, 0);
+    console.log(
+      `#${i + 1}  model: cost ${money(v.cost)} EV ${money(v.ev)} RTP ${((v.ev / v.cost) * 100).toFixed(0)}%   →   live: cost ${money(cost)} EV ${money(ev)} RTP ${((ev / cost) * 100).toFixed(0)}% P(profit) ${pct(pWin)}` +
+        `   ${ev > cost ? "HOLDS" : "DEAD"}`,
+    );
+    for (const l of lines) console.log(l);
+    console.log("");
+    return { i, ev, cost };
+  });
+  mkdirSync("node_modules/.cache", { recursive: true });
+  writeFileSync(CACHE, JSON.stringify(cache));
+  const holds = rows.filter((r) => r.ev > r.cost);
+  console.log(`  ${holds.length} of ${rows.length} hold at live Steam prices   (${calls} Steam requests, rest from cache)\n`);
+}
