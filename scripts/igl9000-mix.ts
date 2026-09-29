@@ -3,6 +3,7 @@
  *
  *   npx tsx scripts/igl9000-mix.ts [--top 25] [--min-cost 1] [--max-cost 50]
  *                                  [--float-skew 0.2] [--tier "Mil-Spec Grade"] [--sort rtp|pwin]
+ *                                  [--venue third-party|steam] [--edge-mult 1] [--edge-band 0.03]
  *
  * The plain catalog sweep (igl9000-gamble.ts) builds one-collection contracts at
  * mid-bracket floats. Profitable budget trade-ups use two levers it never pulls:
@@ -25,7 +26,7 @@
  */
 import { RARITY_ORDER, WEAR_RANGES, type PriceTable, type Rarity, type Skin } from "@/types/cs2";
 import { loadPrices, loadSkins } from "@/lib/data";
-import { marketAvgPriceProvider, type PriceProvider } from "@/lib/igl9000-quote";
+import { marketAvgPriceProvider, steamPriceProvider, type PriceProvider } from "@/lib/igl9000-quote";
 import { valueContract, type CandidateContract, type ValuedContract } from "@/lib/igl9000-engine";
 import { floatToWear } from "@/lib/tradeup";
 
@@ -49,6 +50,11 @@ const SORT = arg("sort") === "pwin" ? "pwin" : "rtp";
 // grade's lower bound, not a fraction of the grade (Battle-Scarred is 0.55 wide):
 // EDGE_MULT within EDGE_BAND, tapering linearly to 1x at 2*EDGE_BAND.
 const EDGE_MULT = Number(arg("edge-mult") ?? 1);
+// Where you buy AND sell. "third-party": ask = cheapest third-party listing,
+// sale nets the third-party average × (1 − 18%). "steam": both sides at the
+// Steam sold-price median; a sale nets price / 1.15. Never mix the two — a
+// Skinport-in, Steam-out contract is venue arbitrage, not a trade-up edge.
+const VENUE = arg("venue") === "steam" ? "steam" : "third-party";
 const EDGE_BAND = Number(arg("edge-band") ?? 0.03);
 const edgeFactor = (dist: number) =>
   dist < EDGE_BAND ? EDGE_MULT : dist < 2 * EDGE_BAND ? EDGE_MULT - (EDGE_MULT - 1) * ((dist - EDGE_BAND) / EDGE_BAND) : 1;
@@ -64,7 +70,8 @@ const skinById = new Map(skins.map((s) => [s.id, s]));
 // The market-avg quote excludes Steam, so with one other venue its dispersion
 // guard never fires and a single stale Skinport listing ($334 vs Steam's $12)
 // becomes a jackpot. Corroborate against Steam before trusting any price.
-const baseQuote = marketAvgPriceProvider(prices, { floatSkew: FLOAT_SKEW });
+const baseQuote =
+  VENUE === "steam" ? steamPriceProvider(prices, { floatSkew: FLOAT_SKEW }) : marketAvgPriceProvider(prices, { floatSkew: FLOAT_SKEW });
 const quote: PriceProvider = (id, wear, st, f) => {
   const src = prices[`${id}|${wear}|${st ? "st" : "norm"}`]?.sources;
   const v = src ? Object.values(src).filter((p): p is number => typeof p === "number" && p > 0) : [];
@@ -456,7 +463,7 @@ const short = (n: string) => n.replace(/^The /, "").replace(/ Collection$/, "");
 const WEAR_ABBR: Record<string, string> = { "Factory New": "FN", "Minimal Wear": "MW", "Field-Tested": "FT", "Well-Worn": "WW", "Battle-Scarred": "BS" };
 const W = (f: number) => WEAR_ABBR[floatToWear(f)];
 
-console.log(`\nIGL-9000 · mixed-collection float-steered sweep   float-skew ${FLOAT_SKEW}   min-depth ${MIN_DEPTH}   edge ${EDGE_MULT}× within ${EDGE_BAND} of a grade boundary   max-spread ${MAX_SPREAD}×   cost $${MIN_COST}–$${MAX_COST}   sort ${SORT}`);
+console.log(`\nIGL-9000 · mixed-collection float-steered sweep   venue ${VENUE}   float-skew ${FLOAT_SKEW}   min-depth ${MIN_DEPTH}   edge ${EDGE_MULT}× within ${EDGE_BAND} of a grade boundary   max-spread ${MAX_SPREAD}×   cost $${MIN_COST}–$${MAX_COST}   sort ${SORT}`);
 console.log(`  anchor collections scanned ${anchorsScanned} → +EV hits ${hits.length} → engine-verified shown ${verified.length}`);
 const nCols = (h: Hit) => new Set(h.slots.map((x) => x.col.id)).size;
 const dist = new Map<number, number>();
