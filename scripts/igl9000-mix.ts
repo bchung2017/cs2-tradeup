@@ -588,12 +588,15 @@ if (VERIFY > 0) {
   }
 
   console.log(`\n── live Steam check: top ${Math.min(VERIFY, verified.length)} ${VENUE === "steam" ? "" : "(model is third-party; Steam shown for comparison) "}──`);
-  console.log(`  buy = Steam lowest listing × edge premium at the cap;  sell = Steam median (lowest if no recent sales) / 1.15\n`);
+  console.log(`  buy = Steam lowest listing × edge premium at the cap;  sell = min(Steam median, lowest listing) / 1.15\n`);
   const rows = verified.slice(0, VERIFY).map(({ h, v }, i) => {
     const lines: string[] = [];
     const check = (label: string, sk: Skin, wear: string, model: number, f: number, side: "buy" | "sell") => {
       const r = live(`${sk.name} (${wear})`);
-      const px = r ? (side === "buy" ? r.lowest ?? r.median : r.median ?? r.lowest) : null;
+      // Selling: a median above the cheapest listing isn't reachable, you'd have to
+      // match or undercut that listing to sell, so take the lower of the two.
+      const sellPx = r && (r.median ?? r.lowest) != null ? Math.min(r.median ?? Infinity, r.lowest ?? Infinity) : null;
+      const px = r ? (side === "buy" ? r.lowest ?? r.median : sellPx) : null;
       const val = px == null ? null : side === "buy" ? px * edgeFactor(gradeOf(sk, f).dist) : px / 1.15;
       const diff = val == null ? null : val / model - 1;
       lines.push(
