@@ -258,3 +258,59 @@ npm run igl9000-mix -- --max-cost 20 --sort pwin     # most reliable
 npm run igl9000-mix -- --tier "Mil-Spec Grade" --top 40
 # knobs: --min-cost --max-spread 2 --min-depth 0.1 --float-skew 0.2
 ```
+
+---
+
+## 9. Update 2026-09-29: the first live run, the edge premium, and N-collection search
+
+**The first live contract lost at purchase, not at the roll.** Recipe A was run
+with 7× P250 Red Tide FT @0.17 and 3× MAG-7 Resupply MW @0.08. The float math
+matched an independent calculator to 4+ decimals (avg 0.18267; Mulberry 0.1370,
+Bleeding Edge 0.1096), so the structure is right. But the inputs cost **$0.55 and
+$0.65 each**: 3.4–5.4× the model. Total $5.80 against an after-fee EV of about $2.22.
+The contract hit USP-S Bleeding Edge (net about $1.88) and could not have been
+positive on any outcome.
+
+**Lesson: float-within-grade pricing is not a ±10% skew.** A float just past a wear
+boundary *looks* like the better grade and is priced like it. Both inputs sat within
+0.02 of a boundary. Every float-blind calculator (the YouTuber's, the one used for
+the run, and our first model) prices inputs at the flat grade price, which is why
+"70% / 213%" recipes keep getting published. Recipes A, B and C only work with
+edge floats and are dead at real prices. Recipe D (Lunar Wyrm) never needed an
+edge float.
+
+**Model changes in `scripts/igl9000-mix.ts`:**
+- `--edge-mult` / `--edge-band`: ask × EDGE_MULT within EDGE_BAND float of a
+  grade's lower bound, tapering to 1× at 2×EDGE_BAND. The band is an **absolute
+  float distance** (default 0.03), not a fraction of the grade: the premium is
+  about looks, and Battle-Scarred is 0.55 wide. Calibrated as a first guess: `--edge-mult 4`.
+  Applied on the buy side only (outcome premiums are upside we don't count).
+- Buy zones start where the edge band ends. A cap inside the band is flagged ⚠.
+- Each contract prints its **float budget** (Σ normalized floats ≤ N·Tmax, where
+  Tmax is the highest average before any outcome changes grade). Caps are one
+  allocation of that budget, spread by water-filling.
+
+**N-collection search (replaces the two-collection pair scan).** Each slot is any
+(collection, float) item, so a contract can mix up to N collections and can mix
+floats within one collection. At a fixed target float, the exact integer optimum
+comes from a DP: state (slots used, float budget used, anchor used?), items
+pruned to the value/float Pareto front, float on a 0.005 grid rounded up so
+accepted contracts truly fit. It runs once per anchor collection (forced to
+contribute at least one slot) at each of its breakpoints, plus an
+unconstrained pass at every breakpoint. About 13 s for the whole catalog.
+
+Theory: with EV fixed at a given T, this is an LP with two constraints, so pure-EV
+optima need at most two item types. 3+ collections win only through integer
+rounding, float mixing, or forced anchors. Measured: of the unconstrained
+per-T optima, about 20% use 3+ collections (with the edge premium: 1→32, 2→66,
+3→29, 4→1). The main list keeps one row per dominant collection ("family") and
+counts its variants.
+
+**What survives the 4× edge penalty (third-party, $1–$20):** the Harlequin
+Zeus x27 Earth Mandala family (AWP Exothermic, 45%), 10× Sawed-Off Lunar Wyrm BS
+0.51–1.00 (100% profit, RTP 143%, no edge exposure at all), and a handful of
+Consumer/Industrial contracts whose big outcomes come from old collections
+(Nuke, Mirage, 2021 Dust 2). Treat those as price-risk until verified.
+
+**Still the real fix:** price inputs from actual listings (price, float, depth).
+The edge multiplier is one data point from one run.

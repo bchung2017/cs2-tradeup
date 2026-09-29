@@ -42,6 +42,16 @@ const ONLY_TIER = arg("tier");
 const MAX_SPREAD = Number(arg("max-spread") ?? 2);
 const MIN_DEPTH = Number(arg("min-depth") ?? 0.1);
 const SORT = arg("sort") === "pwin" ? "pwin" : "rtp";
+// Edge premium: floats just past a wear boundary look like the better grade and
+// are priced like it. First run (2026-09-29) paid 3.4-5.4x the model for P250
+// Red Tide FT @0.17 and MAG-7 Resupply MW @0.08, both within 0.02 of a boundary.
+// The premium is about looks, so the band is an absolute float distance above the
+// grade's lower bound, not a fraction of the grade (Battle-Scarred is 0.55 wide):
+// EDGE_MULT within EDGE_BAND, tapering linearly to 1x at 2*EDGE_BAND.
+const EDGE_MULT = Number(arg("edge-mult") ?? 1);
+const EDGE_BAND = Number(arg("edge-band") ?? 0.03);
+const edgeFactor = (dist: number) =>
+  dist < EDGE_BAND ? EDGE_MULT : dist < 2 * EDGE_BAND ? EDGE_MULT - (EDGE_MULT - 1) * ((dist - EDGE_BAND) / EDGE_BAND) : 1;
 
 const EXCLUDED = "Limited Edition Item";
 const G = 1000; // normalized-float grid resolution
@@ -63,6 +73,24 @@ const quote: PriceProvider = (id, wear, st, f) => {
 };
 
 const colsOf = (s: Skin) => s.collections.filter((c) => c.name !== EXCLUDED);
+
+// Position of a float inside its (skin-clipped) wear grade, and the part of the
+// grade free of the edge premium.
+function gradeOf(sk: Skin, f: number) {
+  const br = WEAR_RANGES.find((w) => w.wear === floatToWear(f))!;
+  const lo = Math.max(br.min, sk.min_float);
+  const hi = Math.min(br.max, sk.max_float) - 1e-4;
+  return { br, lo, hi, dist: f - lo, clean: Math.min(hi, lo + 2 * EDGE_BAND) };
+}
+
+// Same quote, with the edge premium on the BUY side. Sale values are left alone:
+// a low-float outcome selling at a premium is upside we don't count on.
+const buyQuote: PriceProvider = (id, wear, st, f) => {
+  const q = quote(id, wear, st, f);
+  const sk = skinById.get(id);
+  if (!q || f == null || !sk || EDGE_MULT === 1) return q;
+  return { ...q, ask: q.ask * edgeFactor(gradeOf(sk, f).dist) };
+};
 
 interface Col {
   id: string;
@@ -95,7 +123,7 @@ function buildCol(id: string, name: string, inputs: Skin[], outputs: Skin[]): Co
       if (!qLo || !qHi) continue;
       for (let i = Math.max(0, Math.ceil(((lo - s.min_float) / span) * G)); i <= G; i++) {
         const f = Math.min(s.min_float + (i / G) * span, hi);
-        const ask = qLo.ask + ((f - lo) / (hi - lo)) * (qHi.ask - qLo.ask);
+        const ask = (qLo.ask + ((f - lo) / (hi - lo)) * (qHi.ask - qLo.ask)) * edgeFactor(f - bLo);
         if (ask < cost[i]) { cost[i] = ask; pickSkin[i] = s; pickFloat[i] = f; }
       }
     }
@@ -138,19 +166,104 @@ function outcomeBids(c: Col, T: number): number[] | null {
   return res;
 }
 
+interface Slot { col: Col; j: number } // j indexes the DP grid (normalized float ≤ j/GD)
+
 interface Hit {
   tier: Rarity;
   size: number;
-  A: Col; B: Col | null; k: number; T: number;
-  iA: number; iB: number;
+  slots: Slot[];
+  T: number;
   cost: number; ev: number;
 }
 
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
+// Coarser float grid for the knapsack. A slot's float is rounded UP to the grid,
+// so any contract the DP accepts really does fit the float budget.
+const GD = 200;
+const STEP = G / GD;
+
+interface Item { col: Col; j: number; cost: number; val: number; isA: boolean }
+
+// Exact best contract that includes at least one input from `A`, for a fixed
+// target average float T: choose N slots, each any (collection, float) item,
+// with Σ float ≤ N·T, maximizing Σ (collection EV share − input cost).
+// Pure-EV optima need at most two item types (an LP with two constraints has
+// basic solutions of support two); the integer DP can use more when rounding
+// or the "include A" requirement makes that better.
+// With A = null there is no anchor requirement: the unconstrained optimum.
+function bestWithAnchor(A: Col | null, T: number, N: number, others: Col[]): { slots: Slot[]; delta: number; cost: number } | null {
+  const bA = A ? outcomeBids(A, T) : null;
+  if (A && !bA) return null;
+  const W = Math.floor(N * T * GD + 1e-9);
+  const pool: Item[] = [];
+  const addCol = (c: Col, v: number, isA: boolean) => {
+    let last = Infinity;
+    for (let j = 0; j <= Math.min(GD, W); j++) {
+      const cost = c.cost[j * STEP];
+      if (!Number.isFinite(cost) || cost >= last) continue;
+      last = cost;
+      pool.push({ col: c, j, cost, val: v - cost, isA });
+    }
+  };
+  if (A) addCol(A, mean(bA!) / N, true);
+  for (const c of others) {
+    if (c === A) continue;
+    const b = outcomeBids(c, T);
+    if (b) addCol(c, mean(b) / N, !A);
+  }
+  // Pareto prune: a non-anchor item is useless if another item is at least as
+  // light and at least as valuable. Anchor items stay (the DP must use one).
+  pool.sort((x, y) => x.j - y.j || y.val - x.val);
+  const items: Item[] = [];
+  let bestVal = -Infinity;
+  for (const it of pool) {
+    if ((A && it.isA) || it.val > bestVal + 1e-12) items.push(it);
+    if (it.val > bestVal) bestVal = it.val;
+  }
+
+  const S = (W + 1) * 2;
+  const dp = new Float64Array((N + 1) * S).fill(-Infinity);
+  const via = new Int32Array((N + 1) * S).fill(-1); // item index
+  const from = new Int32Array((N + 1) * S).fill(-1); // previous state offset
+  dp[0] = 0;
+  for (let sl = 0; sl < N; sl++) {
+    const base = sl * S, next = (sl + 1) * S;
+    for (let w = 0; w <= W; w++) {
+      for (let f = 0; f < 2; f++) {
+        const cur = dp[base + w * 2 + f];
+        if (cur === -Infinity) continue;
+        for (let k = 0; k < items.length; k++) {
+          const it = items[k];
+          const w2 = w + it.j;
+          if (w2 > W) break;
+          const idx = next + w2 * 2 + (it.isA ? 1 : f);
+          const nv = cur + it.val;
+          if (nv > dp[idx]) { dp[idx] = nv; via[idx] = k; from[idx] = base + w * 2 + f; }
+        }
+      }
+    }
+  }
+  let bi = -1;
+  for (let w = 0; w <= W; w++) {
+    const idx = N * S + w * 2 + 1;
+    if (dp[idx] > -Infinity && (bi < 0 || dp[idx] > dp[bi])) bi = idx;
+  }
+  if (bi < 0) return null;
+  const slots: Slot[] = [];
+  let cost = 0;
+  for (let idx = bi; idx >= S; idx = from[idx]) {
+    const it = items[via[idx]];
+    slots.push({ col: it.col, j: it.j });
+    cost += it.cost;
+  }
+  return { slots, delta: dp[bi], cost };
+}
+
 const tiers = RARITY_ORDER.slice(0, RARITY_ORDER.indexOf("Covert") + 1).filter((t) => !ONLY_TIER || t === ONLY_TIER);
 const hits: Hit[] = [];
-let pairsScanned = 0;
+let anchorsScanned = 0;
+const freeCols = new Map<number, number>(); // collections used by unconstrained per-T optima
 
 for (const tier of tiers) {
   const out = RARITY_ORDER[RARITY_ORDER.indexOf(tier) + 1];
@@ -180,54 +293,98 @@ for (const tier of tiers) {
     if (c) cols.push(c);
   }
 
-  // Best hit per (A, B) — ordered, so A carries k inputs. B null = single collection.
+  // Best contract per anchor collection, over every T at one of its breakpoints.
   for (const A of cols) {
-    for (const B of [null, ...cols]) {
-      if (B === A) continue;
-      pairsScanned++;
-      let best: Hit | null = null;
-      const Ts = B ? [...new Set([...A.breakpoints, ...B.breakpoints])] : A.breakpoints;
-      for (const T of Ts) {
-        const bA = outcomeBids(A, T);
-        if (!bA) continue;
-        const bB = B ? outcomeBids(B, T) : null;
-        if (B && !bB) continue;
-        const evA = mean(bA), evB = bB ? mean(bB) : 0;
-        for (let k = B ? 1 : N; k <= (B ? N - 1 : N); k++) {
-          const ev = (k * evA + (N - k) * evB) / N;
-          let cost = Infinity, iA = -1, iB = -1;
-          for (const ia of A.frontier) {
-            const nA = ia / G;
-            if (k * nA > N * T + 1e-12) break;
-            let ib = -1, c = k * A.cost[ia];
-            if (B) {
-              const nB = Math.min(1, (N * T - k * nA) / (N - k));
-              ib = Math.floor(nB * G + 1e-9);
-              c += (N - k) * B.cost[ib];
-            }
-            if (c < cost) { cost = c; iA = ia; iB = ib; }
-          }
-          if (!Number.isFinite(cost) || cost < MIN_COST || cost > MAX_COST) continue;
-          if (!best || ev - cost > best.ev - best.cost) best = { tier, size: N, A, B, k, T, iA, iB, cost, ev };
-        }
+    anchorsScanned++;
+    let best: Hit | null = null;
+    for (const T of A.breakpoints) {
+      const r = bestWithAnchor(A, T, N, cols);
+      if (!r || r.delta <= 0 || r.cost < MIN_COST || r.cost > MAX_COST) continue;
+      if (!best || r.delta > best.ev - best.cost) best = { tier, size: N, slots: r.slots, T, cost: r.cost, ev: r.cost + r.delta };
+    }
+    if (best) hits.push(best);
+  }
+
+  // Unconstrained optimum at every breakpoint of every collection: answers
+  // whether 3+ collections ever win on their own, without a forced anchor.
+  const allTs = [...new Set(cols.flatMap((c) => c.breakpoints))];
+  for (const T of allTs) {
+    const r = bestWithAnchor(null, T, N, cols);
+    if (!r || r.delta <= 0 || r.cost < MIN_COST || r.cost > MAX_COST) continue;
+    const k = new Set(r.slots.map((x) => x.col.id)).size;
+    freeCols.set(k, (freeCols.get(k) ?? 0) + 1);
+    hits.push({ tier, size: N, slots: r.slots, T, cost: r.cost, ev: r.cost + r.delta });
+  }
+}
+
+// The average normalized float may rise until the first outcome changes grade.
+function tMaxOf(h: Hit): number {
+  let tMax = 1;
+  for (const c of new Set(h.slots.map((x) => x.col))) {
+    for (const o of c.outputs) {
+      const r = o.max_float - o.min_float;
+      if (r <= 0) continue;
+      for (const b of BOUNDARIES) {
+        const t = (b - o.min_float) / r - 1e-4;
+        if (t >= h.T - 1e-9 && t < tMax) tMax = t;
       }
-      if (best && best.ev > best.cost) hits.push(best);
     }
   }
+  return tMax;
 }
 
 // ── verify finalists with the engine ────────────────────────────────────────
 function toContract(h: Hit): CandidateContract {
-  const slots = [
-    ...Array(h.k).fill(0).map(() => ({ skinId: h.A.pickSkin[h.iA]!.id, float: h.A.pickFloat[h.iA], owned: false })),
-    ...(h.B ? Array(h.size - h.k).fill(0).map(() => ({ skinId: h.B!.pickSkin[h.iB]!.id, float: h.B!.pickFloat[h.iB], owned: false })) : []),
-  ];
-  return { tier: h.tier, size: h.size, collectionId: h.B ? "*mixed*" : h.A.id, collectionName: h.B ? `${h.A.name} + ${h.B.name}` : h.A.name, slots, buys: h.size };
+  // The cost curve stores the LOWEST float that reaches a price, which would pin
+  // every cap to the start of the clean zone. The slot's float budget is j/GD,
+  // so any float up to that (inside the picked grade) is equally acceptable.
+  const raw = h.slots.map(({ col, j }) => {
+    const sk = col.pickSkin[j * STEP]!;
+    const g = gradeOf(sk, col.pickFloat[j * STEP]);
+    const budget = sk.min_float + (j / GD) * (sk.max_float - sk.min_float);
+    return { skinId: sk.id, float: Math.max(col.pickFloat[j * STEP], Math.min(budget, g.hi)), owned: false };
+  });
+  // The DP spends only the float budget it needs. Hand the unused budget back as
+  // looser caps (water-filling, each slot kept inside its own wear grade): a
+  // wider buy zone is easier to fill and further from the priced-up edge.
+  const nz = (sl: { skinId: string; float: number }) => norm(sl.float, skinById.get(sl.skinId)!);
+  const tMax = tMaxOf(h);
+  let slack = h.size * tMax - raw.reduce((a, sl) => a + nz(sl), 0) - 1e-6;
+  for (let round = 0; round < 20 && slack > 1e-9; round++) {
+    const open = raw.filter((sl) => {
+      const sk = skinById.get(sl.skinId)!;
+      return norm(gradeOf(sk, sl.float).hi, sk) - nz(sl) > 1e-9;
+    });
+    if (!open.length) break;
+    const share = slack / open.length;
+    for (const sl of open) {
+      const sk = skinById.get(sl.skinId)!;
+      const add = Math.min(share, norm(gradeOf(sk, sl.float).hi, sk) - nz(sl));
+      sl.float += add * (sk.max_float - sk.min_float);
+      slack -= add;
+    }
+  }
+  // Grid rounding scatters one skin across near-identical caps (0.449, 0.446…).
+  // Collapse each skin+grade to its strictest cap: lower floats only help.
+  const capOf = new Map<string, number>();
+  for (const sl of raw) {
+    const k = `${sl.skinId}|${floatToWear(sl.float)}`;
+    capOf.set(k, Math.min(capOf.get(k) ?? Infinity, sl.float));
+  }
+  const slots = raw.map((sl) => ({ ...sl, float: capOf.get(`${sl.skinId}|${floatToWear(sl.float)}`)! }));
+  const names = [...new Set(h.slots.map((s) => s.col.name))];
+  return { tier: h.tier, size: h.size, collectionId: names.length > 1 ? "*mixed*" : h.slots[0].col.id, collectionName: names.join(" + "), slots, buys: h.size };
 }
 
-// One row per unordered collection pair: A+B and B+A are the same contract family.
+// One row per set of collections used.
 const seen = new Set<string>();
 const seenWins = new Set<string>();
+const variants = new Map<string, number>();
+function dominant(h: Hit): Col {
+  const n = new Map<Col, number>();
+  for (const x of h.slots) n.set(x.col, (n.get(x.col) ?? 0) + 1);
+  return [...n].sort((a, b) => b[1] - a[1])[0][0];
+}
 const norm = (f: number, s: Skin) => (f - s.min_float) / (s.max_float - s.min_float);
 const inputColIds = (v: ValuedContract) =>
   new Set(v.contract.slots.flatMap((sl) => colsOf(skinById.get(sl.skinId)!).map((c) => c.id)));
@@ -235,12 +392,19 @@ const inputColIds = (v: ValuedContract) =>
 // Inputs are bought as "≤ cap", so a real fill lands anywhere between the bottom
 // of the cap's wear bracket and the cap. That brackets the contract's mean
 // normalized float, and with it every outcome's float.
+// Where to actually buy: from the end of the edge band up to the cap. If the cap
+// itself sits in the edge band, there is no clean zone and the row is flagged.
+function buyLow(sk: Skin, cap: number): { lo: number; edge: boolean } {
+  const g = gradeOf(sk, cap);
+  if (EDGE_MULT === 1) return { lo: g.lo, edge: false };
+  return g.clean < cap ? { lo: g.clean, edge: false } : { lo: g.lo, edge: true };
+}
+
 function floatWindow(v: ValuedContract): { tLo: number; tHi: number } {
   let lo = 0, hi = 0;
   for (const sl of v.contract.slots) {
     const sk = skinById.get(sl.skinId)!;
-    const br = WEAR_RANGES.find((w) => w.wear === floatToWear(sl.float))!;
-    lo += norm(Math.max(br.min, sk.min_float), sk);
+    lo += norm(buyLow(sk, sl.float).lo, sk);
     hi += norm(sl.float, sk);
   }
   const n = v.contract.slots.length;
@@ -250,13 +414,13 @@ function floatWindow(v: ValuedContract): { tLo: number; tHi: number } {
 const verified = hits
   .sort((a, b) => b.ev / b.cost - a.ev / a.cost)
   .filter((h) => {
-    const key = [h.tier, h.A.id, h.B?.id ?? ""].sort().join("|");
+    const key = [h.tier, ...new Set(h.slots.map((x) => x.col.id))].sort().join("|");
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   })
   .slice(0, TOP * 20)
-  .map((h) => ({ h, v: valueContract(toContract(h), skinById, quote, false) }))
+  .map((h) => ({ h, v: valueContract(toContract(h), skinById, buyQuote, false) }))
   .filter((x) => x.v && !x.v.approx && x.v.delta > 0)
   .map((x) => {
     const v = x.v!;
@@ -270,13 +434,19 @@ const verified = hits
     return { ...x, v, wins, pWin, top, robust: shockedEv > v.cost, rtp: v.ev / v.cost };
   })
   .sort((a, b) => (SORT === "pwin" ? b.pWin - a.pWin || b.rtp - a.rtp : b.rtp - a.rtp))
-  // One row per set of winning outcomes: a strong collection paired with twenty
-  // interchangeable fillers is one opportunity, not twenty.
+  // One row per set of winning outcomes, then one row per FAMILY: the collection
+  // holding the most slots. A strong collection with a dozen interchangeable
+  // single fillers is one opportunity; the variant count says how many.
   .filter((x) => {
     const key = `${x.h.tier}|${x.wins.map((o) => `${o.name}|${o.wear}`).sort().join(",")}`;
     if (seenWins.has(key)) return false;
     seenWins.add(key);
     return true;
+  })
+  .filter((x) => {
+    const key = `${x.h.tier}|${dominant(x.h).id}`;
+    variants.set(key, (variants.get(key) ?? 0) + 1);
+    return variants.get(key) === 1;
   })
   .slice(0, TOP);
 
@@ -286,20 +456,28 @@ const short = (n: string) => n.replace(/^The /, "").replace(/ Collection$/, "");
 const WEAR_ABBR: Record<string, string> = { "Factory New": "FN", "Minimal Wear": "MW", "Field-Tested": "FT", "Well-Worn": "WW", "Battle-Scarred": "BS" };
 const W = (f: number) => WEAR_ABBR[floatToWear(f)];
 
-console.log(`\nIGL-9000 · mixed-collection float-steered sweep   float-skew ${FLOAT_SKEW}   min-depth ${MIN_DEPTH}   max-spread ${MAX_SPREAD}×   cost $${MIN_COST}–$${MAX_COST}   sort ${SORT}`);
-console.log(`  collection pairs scanned ${pairsScanned} → +EV hits ${hits.length} → engine-verified shown ${verified.length}`);
+console.log(`\nIGL-9000 · mixed-collection float-steered sweep   float-skew ${FLOAT_SKEW}   min-depth ${MIN_DEPTH}   edge ${EDGE_MULT}× within ${EDGE_BAND} of a grade boundary   max-spread ${MAX_SPREAD}×   cost $${MIN_COST}–$${MAX_COST}   sort ${SORT}`);
+console.log(`  anchor collections scanned ${anchorsScanned} → +EV hits ${hits.length} → engine-verified shown ${verified.length}`);
+const nCols = (h: Hit) => new Set(h.slots.map((x) => x.col.id)).size;
+const dist = new Map<number, number>();
+for (const h of hits) dist.set(nCols(h), (dist.get(nCols(h)) ?? 0) + 1);
+console.log(`  collections per +EV hit (anchor-forced + free): ${[...dist].sort((a, b) => a[0] - b[0]).map(([k, n]) => `${k}→${n}`).join("  ")}`);
+console.log(`  collections per unconstrained optimum (one per target float): ${[...freeCols].sort((a, b) => a[0] - b[0]).map(([k, n]) => `${k}→${n}`).join("  ")}`);
 console.log(`  outcome floats are a range: inputs bought "≤ cap" can fill anywhere from the bottom of that wear grade up to the cap.`);
-console.log(`  Payouts are valued at the WORST end (inputs at the cap); a lower fill can only improve wear.\n`);
+console.log(`  Payouts are valued at the WORST end (inputs at the cap); a lower fill can only improve wear.`);
+if (EDGE_MULT !== 1) console.log(`  With the edge premium on, input ranges start where the edge band ends: buying lower pays the premium for no gain.`);
+console.log("");
 
 verified.forEach(({ h, v, wins, pWin, robust, rtp }, i) => {
   const { tLo, tHi } = floatWindow(v);
   const cols = inputColIds(v);
 
-  const groups = new Map<string, { n: number; f: number }>();
+  const groups = new Map<string, { id: string; n: number; f: number }>();
   for (const sl of v.contract.slots) {
-    const g = groups.get(sl.skinId) ?? { n: 0, f: sl.float };
+    const key = `${sl.skinId}|${floatToWear(sl.float)}`;
+    const g = groups.get(key) ?? { id: sl.skinId, n: 0, f: sl.float };
     g.n++;
-    groups.set(sl.skinId, g);
+    groups.set(key, g);
   }
 
   const winValue = wins.reduce((a, o) => a + o.probability * (o.bidNet ?? 0), 0) / (pWin || 1);
@@ -308,14 +486,21 @@ verified.forEach(({ h, v, wins, pWin, robust, rtp }, i) => {
       `   P(profit) ${pct(pWin)} across ${wins.length} of ${v.outcomes.length} outcomes   avg win ${money(winValue)}` +
       (robust ? "" : "   [fragile: −30% on the winners kills it]"),
   );
-  console.log(`    inputs (avg normalized float ${tLo.toFixed(4)}–${tHi.toFixed(4)})`);
-  for (const [id, g] of groups) {
+  const nVar = (variants.get(`${h.tier}|${dominant(h).id}`) ?? 1) - 1;
+  if (nVar > 0) console.log(`    (+${nVar} variant${nVar > 1 ? "s" : ""} built on ${short(dominant(h).name)} with other fillers)`);
+  console.log(
+    `    float budget: Σ (float − min)/(max − min) over all ${v.contract.size} inputs ≤ ${(v.contract.size * tMaxOf(h)).toFixed(3)}` +
+      `   (these caps use ${(v.contract.size * tHi).toFixed(3)}; avg normalized ${tLo.toFixed(4)}–${tHi.toFixed(4)})`,
+  );
+  console.log(`    inputs`);
+  for (const { id, ...g } of groups.values()) {
     const sk = skinById.get(id)!;
     const br = WEAR_RANGES.find((w) => w.wear === floatToWear(g.f))!;
-    const lo = Math.max(br.min, sk.min_float);
+    const { lo, edge } = buyLow(sk, g.f);
     console.log(
       `      ${String(g.n).padStart(2)}× ${sk.name.padEnd(32)} ${WEAR_ABBR[br.wear]} ${lo.toFixed(3)}–${g.f.toFixed(3)}` +
-        `   ${money(quote(id, br.wear, false, g.f)!.ask)} ea   [${short(colsOf(sk)[0].name)}]`,
+        `   ${money(buyQuote(id, br.wear, false, g.f)!.ask)} ea   range ${sk.min_float.toFixed(2)}–${sk.max_float.toFixed(2)}   [${short(colsOf(sk)[0].name)}]` +
+        (edge ? "   ⚠ cap is inside the edge band: expect edge pricing" : ""),
     );
   }
   console.log(`    outcomes`);
