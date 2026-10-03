@@ -5,6 +5,15 @@
  *                                  [--float-skew 0.2] [--tier "Mil-Spec Grade"] [--sort rtp|pwin]
  *                                  [--venue third-party|steam] [--edge-mult 1] [--edge-band 0.03]
  *                                  [--verify-steam K] [--steam-gap 8]   live-check the top K against Steam
+ *                                  [--min-rtp 0.85]   also keep near-misses down to this model RTP
+ *   npx tsx scripts/igl9000-mix.ts --contract "9x MAC-10 | Sakkaku@0.24, 1x Negev | Lionfish@0.11"
+ *                                  value one given contract and live-check it (skips the sweep)
+ *
+ * The live check prices each input from Steam listings whose float is at or under
+ * the slot's cap (the n cheapest, for n slots), not from the wear grade's lowest
+ * listing: low floats near a grade boundary or a skin's own minimum float sell at
+ * skin-specific premiums no single multiplier captures (Sakkaku ≤0.24: $5-11
+ * against $0.95 for the grade). In the sweep, --edge-mult is only a pre-filter.
  *
  * The plain catalog sweep (igl9000-gamble.ts) builds one-collection contracts at
  * mid-bracket floats. Profitable budget trade-ups use two levers it never pulls:
@@ -25,13 +34,12 @@
  * costs +skew/2). It is a model, not listing data: rerun with a higher
  * --float-skew to see which contracts survive expensive low-float fillers.
  */
-import { RARITY_ORDER, WEAR_RANGES, type PriceTable, type Rarity, type Skin } from "@/types/cs2";
+import { RARITY_ORDER, WEAR_RANGES, type PriceTable, type Rarity, type Skin, type Wear } from "@/types/cs2";
 import { loadPrices, loadSkins } from "@/lib/data";
 import { marketAvgPriceProvider, steamPriceProvider, type PriceProvider } from "@/lib/igl9000-quote";
 import { valueContract, type CandidateContract, type ValuedContract } from "@/lib/igl9000-engine";
 import { floatToWear } from "@/lib/tradeup";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { steamMarket } from "@/lib/steam-market";
 
 const argv = process.argv.slice(2);
 const arg = (k: string) => {
@@ -46,6 +54,12 @@ const ONLY_TIER = arg("tier");
 const MAX_SPREAD = Number(arg("max-spread") ?? 2);
 const MIN_DEPTH = Number(arg("min-depth") ?? 0.1);
 const SORT = arg("sort") === "pwin" ? "pwin" : "rtp";
+// 1 = only contracts the model calls profitable. Lower keeps near-misses too: a
+// model-91% contract can be the best bet left once live prices come in, and only
+// a live check can tell which way the model is wrong.
+const MIN_RTP = Number(arg("min-rtp") ?? 1);
+const keep = (ev: number, cost: number) => (MIN_RTP >= 1 ? ev > cost : ev >= MIN_RTP * cost);
+const CONTRACT = arg("contract");
 // Edge premium: floats just past a wear boundary look like the better grade and
 // are priced like it. First run (2026-09-29) paid 3.4-5.4x the model for P250
 // Red Tide FT @0.17 and MAG-7 Resupply MW @0.08, both within 0.02 of a boundary.
@@ -292,7 +306,7 @@ function bestWithAnchor(A: Col | null, T: number, N: number, others: Col[]): { s
   return { slots, delta: dp[bi], cost };
 }
 
-const tiers = RARITY_ORDER.slice(0, RARITY_ORDER.indexOf("Covert") + 1).filter((t) => !ONLY_TIER || t === ONLY_TIER);
+const tiers = CONTRACT ? [] : RARITY_ORDER.slice(0, RARITY_ORDER.indexOf("Covert") + 1).filter((t) => !ONLY_TIER || t === ONLY_TIER);
 const hits: Hit[] = [];
 let anchorsScanned = 0;
 const freeCols = new Map<number, number>(); // collections used by unconstrained per-T optima
@@ -331,7 +345,7 @@ for (const tier of tiers) {
     let best: Hit | null = null;
     for (const T of A.breakpoints) {
       const r = bestWithAnchor(A, T, N, cols);
-      if (!r || r.delta <= 0 || r.cost < MIN_COST || r.cost > MAX_COST) continue;
+      if (!r || !keep(r.cost + r.delta, r.cost) || r.cost < MIN_COST || r.cost > MAX_COST) continue;
       if (!best || r.delta > best.ev - best.cost) best = { tier, size: N, slots: r.slots, T, cost: r.cost, ev: r.cost + r.delta };
     }
     if (best) hits.push(best);
@@ -342,7 +356,7 @@ for (const tier of tiers) {
   const allTs = [...new Set(cols.flatMap((c) => c.breakpoints))];
   for (const T of allTs) {
     const r = bestWithAnchor(null, T, N, cols);
-    if (!r || r.delta <= 0 || r.cost < MIN_COST || r.cost > MAX_COST) continue;
+    if (!r || !keep(r.cost + r.delta, r.cost) || r.cost < MIN_COST || r.cost > MAX_COST) continue;
     const k = new Set(r.slots.map((x) => x.col.id)).size;
     freeCols.set(k, (freeCols.get(k) ?? 0) + 1);
     hits.push({ tier, size: N, slots: r.slots, T, cost: r.cost, ev: r.cost + r.delta });
@@ -453,7 +467,7 @@ const verified = hits
   })
   .slice(0, TOP * 20)
   .map((h) => ({ h, v: valueContract(toContract(h), skinById, buyQuote, false) }))
-  .filter((x) => x.v && !x.v.approx && x.v.delta > 0)
+  .filter((x) => x.v && !x.v.approx && keep(x.v.ev, x.v.cost))
   .map((x) => {
     const v = x.v!;
     const wins = v.outcomes.filter((o) => (o.bidNet ?? 0) > v.cost);
@@ -488,17 +502,19 @@ const short = (n: string) => n.replace(/^The /, "").replace(/ Collection$/, "");
 const WEAR_ABBR: Record<string, string> = { "Factory New": "FN", "Minimal Wear": "MW", "Field-Tested": "FT", "Well-Worn": "WW", "Battle-Scarred": "BS" };
 const W = (f: number) => WEAR_ABBR[floatToWear(f)];
 
-console.log(`\nIGL-9000 · mixed-collection float-steered sweep   venue ${VENUE}   float-skew ${FLOAT_SKEW}   min-depth ${MIN_DEPTH}   edge ${EDGE_MULT}× within ${EDGE_BAND} of a grade boundary   max-spread ${MAX_SPREAD}×   cost $${MIN_COST}–$${MAX_COST}   sort ${SORT}`);
-console.log(`  anchor collections scanned ${anchorsScanned} → +EV hits ${hits.length} → engine-verified shown ${verified.length}`);
-const nCols = (h: Hit) => new Set(h.slots.map((x) => x.col.id)).size;
-const dist = new Map<number, number>();
-for (const h of hits) dist.set(nCols(h), (dist.get(nCols(h)) ?? 0) + 1);
-console.log(`  collections per +EV hit (anchor-forced + free): ${[...dist].sort((a, b) => a[0] - b[0]).map(([k, n]) => `${k}→${n}`).join("  ")}`);
-console.log(`  collections per unconstrained optimum (one per target float): ${[...freeCols].sort((a, b) => a[0] - b[0]).map(([k, n]) => `${k}→${n}`).join("  ")}`);
-console.log(`  outcome floats are a range: inputs bought "≤ cap" can fill anywhere from the bottom of that wear grade up to the cap.`);
-console.log(`  Payouts are valued at the WORST end (inputs at the cap); a lower fill can only improve wear.`);
-if (EDGE_MULT !== 1) console.log(`  With the edge premium on, input ranges start where the edge band ends: buying lower pays the premium for no gain.`);
-console.log("");
+if (!CONTRACT) {
+  console.log(`\nIGL-9000 · mixed-collection float-steered sweep   venue ${VENUE}   float-skew ${FLOAT_SKEW}   min-depth ${MIN_DEPTH}   edge ${EDGE_MULT}× within ${EDGE_BAND} of a grade boundary   max-spread ${MAX_SPREAD}×   cost $${MIN_COST}–$${MAX_COST}   sort ${SORT}`);
+  console.log(`  anchor collections scanned ${anchorsScanned} → hits ${hits.length}${MIN_RTP < 1 ? ` (model RTP ≥ ${(MIN_RTP * 100).toFixed(0)}%)` : " (+EV)"} → engine-verified shown ${verified.length}`);
+  const nCols = (h: Hit) => new Set(h.slots.map((x) => x.col.id)).size;
+  const dist = new Map<number, number>();
+  for (const h of hits) dist.set(nCols(h), (dist.get(nCols(h)) ?? 0) + 1);
+  console.log(`  collections per +EV hit (anchor-forced + free): ${[...dist].sort((a, b) => a[0] - b[0]).map(([k, n]) => `${k}→${n}`).join("  ")}`);
+  console.log(`  collections per unconstrained optimum (one per target float): ${[...freeCols].sort((a, b) => a[0] - b[0]).map(([k, n]) => `${k}→${n}`).join("  ")}`);
+  console.log(`  outcome floats are a range: inputs bought "≤ cap" can fill anywhere from the bottom of that wear grade up to the cap.`);
+  console.log(`  Payouts are valued at the WORST end (inputs at the cap); a lower fill can only improve wear.`);
+  if (EDGE_MULT !== 1) console.log(`  With the edge premium on, input ranges start where the edge band ends: buying lower pays the premium for no gain.`);
+  console.log("");
+}
 
 verified.forEach(({ h, v, wins, pWin, robust, rtp }, i) => {
   const { tLo, tHi } = floatWindow(v);
@@ -552,126 +568,153 @@ verified.forEach(({ h, v, wins, pWin, robust, rtp }, i) => {
 });
 
 // ── live Steam checkpoint ───────────────────────────────────────────────────
-// Re-price the top K contracts from Steam's priceoverview (per wear grade, not
-// per float). Checks every input and every outcome that matters (a winner, or
-// worth at least half the contract cost); the rest keep the model price.
-// Requests are spaced and cached for 6 h so repeat runs don't hit Steam again.
-// curl, not fetch: it honours the environment's HTTPS proxy.
-if (VERIFY > 0) {
-  const CACHE = "node_modules/.cache/igl9000-steam.json";
-  const TTL = 6 * 3600e3;
-  // Other sessions may be querying Steam through the same egress IP, so the
-  // budget is shared: space requests generously, back off on 429, and once
-  // throttled stop calling entirely rather than burn the shared limit.
-  const GAP_MS = Number(arg("steam-gap") ?? 8) * 1000;
-  const BACKOFF_MS = [60_000, 120_000];
-  const cache: Record<string, { at: number; lowest: number | null; median: number | null; volume: number }> =
-    existsSync(CACHE) ? JSON.parse(readFileSync(CACHE, "utf8")) : {};
-  let calls = 0;
-  let throttled = false;
-  let rateLimited = 0;
-  const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  const money2 = (s?: string) => (s ? Number(s.replace(/[^0-9.]/g, "")) || null : null);
-  mkdirSync("node_modules/.cache", { recursive: true });
-  function live(name: string) {
-    const hit = cache[name];
-    if (hit && Date.now() - hit.at < TTL) return hit;
-    if (throttled) return null;
-    const url = `https://steamcommunity.com/market/priceoverview/?appid=730&currency=1&market_hash_name=${encodeURIComponent(name)}`;
-    for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
-      if (calls++ > 0) sleep(GAP_MS);
-      let out = "";
-      try {
-        out = execFileSync("curl", ["-sS", "--max-time", "20", "-w", "\n%{http_code}", url], { encoding: "utf8" });
-      } catch {
-        return null; // unreachable: fall back to the model price, reported as unverified
-      }
-      const nl = out.lastIndexOf("\n");
-      const status = Number(out.slice(nl + 1));
-      if (status === 429) {
-        rateLimited++;
-        if (attempt < BACKOFF_MS.length) {
-          console.log(`  [steam 429 on "${name}", backing off ${BACKOFF_MS[attempt] / 1000}s]`);
-          sleep(BACKOFF_MS[attempt]);
-          continue;
-        }
-        throttled = true;
-        console.log(`  [steam still rate-limited, no further requests this run]`);
-        return null;
-      }
-      let j: { success?: boolean; lowest_price?: string; median_price?: string; volume?: string } = {};
-      try {
-        j = JSON.parse(out.slice(0, nl));
-      } catch {
-        return null;
-      }
-      const r = {
-        at: Date.now(),
-        lowest: money2(j.lowest_price),
-        median: money2(j.median_price),
-        volume: j.volume ? Number(j.volume.replace(/[^0-9]/g, "")) || 0 : 0,
-      };
-      cache[name] = r;
-      writeFileSync(CACHE, JSON.stringify(cache)); // survive a killed run
-      return r;
-    }
-    return null;
-  }
+// Inputs: the n cheapest listings with a float between the bottom of the slot's
+// wear grade (or the skin's own minimum) and the slot's cap. Outcomes: the wear
+// grade's priceoverview, since an output sells as "FT", not as a float. Every
+// input and every outcome that matters (a winner, or worth at least half the
+// contract cost) is checked; the rest keep the model price.
+const market = steamMarket({ gapMs: Number(arg("steam-gap") ?? 8) * 1000 });
 
-  console.log(`\n── live Steam check: top ${Math.min(VERIFY, verified.length)} ${VENUE === "steam" ? "" : "(model is third-party; Steam shown for comparison) "}──`);
-  console.log(`  buy = Steam lowest listing × edge premium at the cap;  sell = min(Steam median, lowest listing) / 1.15\n`);
-  const rows = verified.slice(0, VERIFY).map(({ h, v }, i) => {
-    const lines: string[] = [];
-    let missing = 0;
-    const check = (label: string, sk: Skin, wear: string, model: number, f: number, side: "buy" | "sell") => {
-      const r = live(`${sk.name} (${wear})`);
-      // Selling: a median above the cheapest listing isn't reachable, you'd have to
-      // match or undercut that listing to sell, so take the lower of the two.
-      const sellPx = r && (r.median ?? r.lowest) != null ? Math.min(r.median ?? Infinity, r.lowest ?? Infinity) : null;
-      const px = r ? (side === "buy" ? r.lowest ?? r.median : sellPx) : null;
-      const val = px == null ? null : side === "buy" ? px * edgeFactor(gradeOf(sk, f).dist) : px / 1.15;
-      const diff = val == null ? null : val / model - 1;
-      if (val == null) missing++;
-      lines.push(
-        `    ${label} ${`${sk.name} (${WEAR_ABBR[wear]})`.padEnd(40)} model ${money(model).padStart(8)}  live ${val == null ? "      —" : money(val).padStart(8)}` +
-          `${diff == null ? "" : `  ${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(0)}%`.padEnd(8)}` +
-          `${r ? `  vol24h ${r.volume}` : "  (no data)"}${diff != null && Math.abs(diff) > 0.25 ? "  ⚠" : ""}`,
-      );
-      return val ?? model;
-    };
-    let cost = 0;
-    const seenIn = new Map<string, number>();
-    for (const sl of v.contract.slots) {
-      const sk = skinById.get(sl.skinId)!;
-      const wear = floatToWear(sl.float);
-      const k = `${sl.skinId}|${wear}`;
-      if (!seenIn.has(k)) seenIn.set(k, check("in ", sk, wear, buyQuote(sl.skinId, wear, false, sl.float)!.ask, sl.float, "buy"));
-      cost += seenIn.get(k)!;
+function liveCheck(v: ValuedContract, title: string): { ev: number; cost: number; ok: boolean; missing: number } {
+  const lines: string[] = [];
+  let missing = 0;
+  let short = 0;
+  const groups = new Map<string, { sk: Skin; wear: Wear; cap: number; n: number }>();
+  for (const sl of v.contract.slots) {
+    const sk = skinById.get(sl.skinId)!;
+    const wear = floatToWear(sl.float);
+    const g = groups.get(`${sk.id}|${wear}`) ?? { sk, wear, cap: sl.float, n: 0 };
+    g.cap = Math.min(g.cap, sl.float);
+    g.n++;
+    groups.set(`${sk.id}|${wear}`, g);
+  }
+  let cost = 0;
+  for (const { sk, wear, cap, n } of groups.values()) {
+    const lo = Math.max(WEAR_RANGES.find((w) => w.wear === wear)!.min, sk.min_float);
+    const model = buyQuote(sk.id, wear, false, cap)?.ask ?? 0;
+    const book = market.cheapestAtFloat(`${sk.name} (${wear})`, lo, cap, n);
+    const head = `    in  ${String(n).padStart(2)}× ${`${sk.name} (${WEAR_ABBR[wear]}) ${lo.toFixed(3)}–${cap.toFixed(3)}`.padEnd(48)} model ${money(model).padStart(7)} ea`;
+    if (!book) {
+      missing++;
+      cost += model * n;
+      lines.push(`${head}   live —  (not fetched)`);
+      continue;
     }
-    let ev = 0;
-    const liveOut: { p: number; val: number }[] = [];
-    for (const o of v.outcomes) {
-      const model = o.bidNet ?? 0;
-      const material = model > v.cost || model >= 0.5 * v.cost;
-      const val = material ? check("out", skinById.get(o.skinId)!, o.wear, model, o.float, "sell") : model;
-      ev += o.probability * val;
-      liveOut.push({ p: o.probability, val });
-    }
-    const pWin = liveOut.filter((x) => x.val > cost).reduce((a, x) => a + x.p, 0);
-    console.log(
-      `#${i + 1}  model: cost ${money(v.cost)} EV ${money(v.ev)} RTP ${((v.ev / v.cost) * 100).toFixed(0)}%   →   live: cost ${money(cost)} EV ${money(ev)} RTP ${((ev / cost) * 100).toFixed(0)}% P(profit) ${pct(pWin)}` +
-        `   ${missing ? `UNVERIFIED (${missing} price${missing > 1 ? "s" : ""} not fetched)` : ev > cost ? "HOLDS" : "DEAD"}`,
+    const got = book.listings;
+    const paid = got.reduce((a, l) => a + l.price, 0);
+    // a shortfall is priced at the model so the totals stay comparable; the
+    // contract is marked SHORT either way
+    cost += paid + (n - got.length) * model;
+    if (got.length < n) short += n - got.length;
+    const range = got.length ? `${money(got[0].price)}–${money(got[got.length - 1].price)}` : "none";
+    lines.push(
+      `${head}   live ${got.length ? money(paid / got.length).padStart(7) : "      —"} ea (${range})   ${book.total} listed in range` +
+        (got.length < n ? `  ⚠ only ${got.length} of ${n}` : got.length && paid / got.length > 1.25 * model ? "  ⚠" : ""),
     );
-    for (const l of lines) console.log(l);
-    console.log("");
-    return { i, ev, cost, missing };
-  });
-  mkdirSync("node_modules/.cache", { recursive: true });
-  writeFileSync(CACHE, JSON.stringify(cache));
-  const holds = rows.filter((r) => !r.missing && r.ev > r.cost);
-  const unverified = rows.filter((r) => r.missing).length;
+  }
+  let ev = 0;
+  let liquidEv = 0;
+  const outs: { p: number; val: number; liquid: boolean }[] = [];
+  for (const o of v.outcomes) {
+    const sk = skinById.get(o.skinId)!;
+    const model = o.bidNet ?? 0;
+    if (!(model > v.cost || model >= 0.5 * v.cost)) {
+      ev += o.probability * model;
+      liquidEv += o.probability * model;
+      outs.push({ p: o.probability, val: model, liquid: true });
+      continue;
+    }
+    const r = market.priceOverview(`${sk.name} (${o.wear})`);
+    // Selling: a median above the cheapest listing isn't reachable, you'd have to
+    // match or undercut that listing to sell, so take the lower of the two.
+    const px = r && (r.median ?? r.lowest) != null ? Math.min(r.median ?? Infinity, r.lowest ?? Infinity) : null;
+    const val = px == null ? model : px / 1.15;
+    const liquid = !r || r.volume > 0;
+    if (px == null) missing++;
+    ev += o.probability * val;
+    liquidEv += o.probability * (liquid ? val : 0);
+    outs.push({ p: o.probability, val, liquid });
+    const diff = px == null ? null : val / model - 1;
+    lines.push(
+      `    out ${pct(o.probability).padStart(6)} ${`${sk.name} (${WEAR_ABBR[o.wear]})`.padEnd(44)} model ${money(model).padStart(8)}  live ${px == null ? "      —" : money(val).padStart(8)}` +
+        `${diff == null ? "" : `  ${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(0)}%`.padEnd(8)}${r ? `  vol24h ${r.volume}` : "  (no data)"}${liquid ? "" : "  ⚠ no sales: counted as 0"}`,
+    );
+  }
+  const pWin = outs.filter((x) => x.liquid && x.val > cost).reduce((a, x) => a + x.p, 0);
+  const verdict = missing
+    ? `UNVERIFIED (${missing} price${missing > 1 ? "s" : ""} not fetched)`
+    : short
+      ? `SHORT (${short} input${short > 1 ? "s" : ""} not listed under the cap)`
+      : liquidEv > cost
+        ? "HOLDS"
+        : ev > cost
+          ? "PAPER ONLY (needs outcomes with no sales)"
+          : "DEAD";
   console.log(
-    `  ${holds.length} of ${rows.length} hold at live Steam prices${unverified ? `, ${unverified} unverified` : ""}` +
+    `${title}  model: cost ${money(v.cost)} EV ${money(v.ev)} RTP ${((v.ev / v.cost) * 100).toFixed(0)}%   →   live: cost ${money(cost)} EV ${money(liquidEv)}` +
+      `${liquidEv !== ev ? ` (${money(ev)} incl. unsold)` : ""} RTP ${((liquidEv / cost) * 100).toFixed(0)}% P(profit) ${pct(pWin)}   ${verdict}`,
+  );
+  for (const l of lines) console.log(l);
+  console.log("");
+  return { ev: liquidEv, cost, ok: verdict === "HOLDS", missing };
+}
+
+if (VERIFY > 0 && !CONTRACT) {
+  console.log(`\n── live Steam check: top ${Math.min(VERIFY, verified.length)} ${VENUE === "steam" ? "" : "(model is third-party; Steam shown for comparison) "}──`);
+  console.log(`  buy = the n cheapest Steam listings with float in [grade bottom, cap];  sell = min(Steam median, lowest listing) / 1.15\n`);
+  const rows = verified.slice(0, VERIFY).map(({ v }, i) => liveCheck(v, `#${i + 1}`));
+  const holds = rows.filter((r) => r.ok).length;
+  const unverified = rows.filter((r) => r.missing).length;
+  const { calls, rateLimited } = market.stats;
+  console.log(
+    `  ${holds} of ${rows.length} hold at live Steam prices${unverified ? `, ${unverified} unverified` : ""}` +
       `   (${calls} Steam requests, ${rateLimited} rate-limited, rest from cache)\n`,
   );
+}
+
+// ── one given contract ──────────────────────────────────────────────────────
+// "9x MAC-10 | Sakkaku@0.24, 1x Negev | Lionfish@0.11": each part is a count, a
+// skin name and the float you'd buy at or under. Valued by the same engine and
+// live-checked the same way as a sweep result.
+if (CONTRACT) {
+  const slots: { skinId: string; float: number; owned: boolean }[] = [];
+  for (const part of CONTRACT.split(",")) {
+    const m = /^\s*(\d+)\s*[x×]\s*(.+?)\s*@\s*([0-9.]+)\s*$/.exec(part);
+    if (!m) throw new Error(`--contract: can't read "${part.trim()}" (want "9x Skin | Name@0.24")`);
+    const sk = skins.find((s) => s.name === m[2] && !s.souvenir);
+    if (!sk) throw new Error(`--contract: no skin named "${m[2]}"`);
+    const f = Number(m[3]);
+    if (f < sk.min_float || f > sk.max_float) throw new Error(`--contract: ${sk.name} floats run ${sk.min_float}–${sk.max_float}, not ${f}`);
+    for (let i = 0; i < Number(m[1]); i++) slots.push({ skinId: sk.id, float: f, owned: false });
+  }
+  const first = skinById.get(slots[0].skinId)!;
+  const names = [...new Set(slots.map((s) => colsOf(skinById.get(s.skinId)!)[0]?.name ?? "?"))];
+  const v = valueContract(
+    { tier: first.rarity.name as Rarity, size: slots.length, collectionId: names.length > 1 ? "*mixed*" : colsOf(first)[0]?.id ?? "", collectionName: names.join(" + "), slots, buys: slots.length },
+    skinById,
+    buyQuote,
+    false,
+  );
+  if (!v) throw new Error("--contract: not a valid trade-up (mixed rarities, wrong count, or no outputs)");
+
+  // Mean normalized float, and how far it can rise before any outcome changes wear.
+  const T = slots.reduce((a, s) => a + norm(s.float, skinById.get(s.skinId)!), 0) / slots.length;
+  let tMax = 1;
+  for (const o of v.outcomes) {
+    const sk = skinById.get(o.skinId)!;
+    for (const b of BOUNDARIES) {
+      const t = (b - sk.min_float) / (sk.max_float - sk.min_float);
+      if (t > T && t < tMax) tMax = t;
+    }
+  }
+  console.log(`\nIGL-9000 · one contract   ${v.contract.tier} → ${v.outputRarity}   ${names.map(short).join(" + ")}   model venue ${VENUE}`);
+  console.log(
+    `  adjusted float ${T.toFixed(5)}   Σ ${(T * slots.length).toFixed(4)} of ${(tMax * slots.length).toFixed(4)} before the first outcome changes wear` +
+      `   (margin ${((tMax - T) * slots.length).toFixed(4)})`,
+  );
+  for (const o of [...v.outcomes].sort((a, b) => (b.bidNet ?? 0) - (a.bidNet ?? 0))) {
+    console.log(`    ${pct(o.probability).padStart(6)}  ${o.float.toFixed(5)} ${WEAR_ABBR[o.wear].padEnd(3)} ${o.name}`);
+  }
+  console.log("");
+  liveCheck(v, "contract");
 }
