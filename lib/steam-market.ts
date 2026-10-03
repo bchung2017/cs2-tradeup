@@ -178,8 +178,12 @@ export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } 
         const html = get(`https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}?${qs}`, `${name} ≤${hi.toFixed(3)}`);
         if (html == null) return null;
         const page = parseMarketPage(html).search;
-        if (page === undefined) throw new Error(`steam market page: no listing search for "${name}"`);
-        if (page === null) return null; // Steam's soft failure under load: unfetched
+        // Steam sometimes serves the page without its listing search (undefined) or
+        // with the search unloaded (null). Either way: unfetched, never a guess.
+        if (!page) {
+          log(`  [steam page for "${name}" came back without listings]`);
+          return null;
+        }
         total = page.total_count;
         for (const l of page.listings) {
           const f = l.asset?.asset_properties?.find((p) => p.propertyid === 2)?.float_value;

@@ -629,16 +629,17 @@ function liveCheck(v: ValuedContract, title: string): { ev: number; cost: number
     // Selling: a median above the cheapest listing isn't reachable, you'd have to
     // match or undercut that listing to sell, so take the lower of the two.
     const px = r && (r.median ?? r.lowest) != null ? Math.min(r.median ?? Infinity, r.lowest ?? Infinity) : null;
-    const val = px == null ? model : px / 1.15;
+    // fetched but nothing listed and nothing sold: there is no price to sell at
+    const val = px == null ? (r ? 0 : model) : px / 1.15;
     const liquid = !r || r.volume > 0;
-    if (px == null) missing++;
+    if (!r) missing++;
     ev += o.probability * val;
     liquidEv += o.probability * (liquid ? val : 0);
     outs.push({ p: o.probability, val, liquid });
     const diff = px == null || o.bidNet == null ? null : val / model - 1;
     lines.push(
       `    out ${pct(o.probability).padStart(6)} ${`${sk.name} (${WEAR_ABBR[o.wear]})`.padEnd(44)} model ${(o.bidNet == null ? "—" : money(model)).padStart(8)}  live ${px == null ? "      —" : money(val).padStart(8)}` +
-        `${diff == null ? "" : `  ${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(0)}%`.padEnd(8)}${r ? `  vol24h ${r.volume}` : "  (no data)"}${liquid ? "" : "  ⚠ no sales: counted as 0"}`,
+        `${diff == null ? "" : `  ${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(0)}%`.padEnd(8)}${r ? `  vol24h ${r.volume}` : "  (not fetched)"}${r && px == null ? "  ⚠ nothing listed or sold" : liquid ? "" : "  ⚠ no sales: counted as 0"}`,
     );
   }
   const pWin = outs.filter((x) => x.liquid && x.val > cost).reduce((a, x) => a + x.p, 0);
