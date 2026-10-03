@@ -4,7 +4,7 @@
  *   npx tsx scripts/igl9000-mix.ts [--top 25] [--min-cost 1] [--max-cost 50]
  *                                  [--float-skew 0.2] [--tier "Mil-Spec Grade"] [--sort rtp|pwin]
  *                                  [--venue third-party|steam] [--edge-mult 1] [--edge-band 0.03]
- *                                  [--verify-steam K]   live-check the top K against Steam
+ *                                  [--verify-steam K] [--steam-gap 8]   live-check the top K against Steam
  *
  * The plain catalog sweep (igl9000-gamble.ts) builds one-collection contracts at
  * mid-bracket floats. Profitable budget trade-ups use two levers it never pulls:
@@ -560,37 +560,69 @@ verified.forEach(({ h, v, wins, pWin, robust, rtp }, i) => {
 if (VERIFY > 0) {
   const CACHE = "node_modules/.cache/igl9000-steam.json";
   const TTL = 6 * 3600e3;
-  const GAP_MS = 3500;
+  // Other sessions may be querying Steam through the same egress IP, so the
+  // budget is shared: space requests generously, back off on 429, and once
+  // throttled stop calling entirely rather than burn the shared limit.
+  const GAP_MS = Number(arg("steam-gap") ?? 8) * 1000;
+  const BACKOFF_MS = [60_000, 120_000];
   const cache: Record<string, { at: number; lowest: number | null; median: number | null; volume: number }> =
     existsSync(CACHE) ? JSON.parse(readFileSync(CACHE, "utf8")) : {};
   let calls = 0;
+  let throttled = false;
+  let rateLimited = 0;
   const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   const money2 = (s?: string) => (s ? Number(s.replace(/[^0-9.]/g, "")) || null : null);
+  mkdirSync("node_modules/.cache", { recursive: true });
   function live(name: string) {
     const hit = cache[name];
     if (hit && Date.now() - hit.at < TTL) return hit;
-    if (calls++ > 0) sleep(GAP_MS);
+    if (throttled) return null;
     const url = `https://steamcommunity.com/market/priceoverview/?appid=730&currency=1&market_hash_name=${encodeURIComponent(name)}`;
-    let j: { success?: boolean; lowest_price?: string; median_price?: string; volume?: string } = {};
-    try {
-      j = JSON.parse(execFileSync("curl", ["-sS", "--max-time", "20", url], { encoding: "utf8" }));
-    } catch {
-      return null; // rate-limited or unreachable: fall back to the model price
+    for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
+      if (calls++ > 0) sleep(GAP_MS);
+      let out = "";
+      try {
+        out = execFileSync("curl", ["-sS", "--max-time", "20", "-w", "\n%{http_code}", url], { encoding: "utf8" });
+      } catch {
+        return null; // unreachable: fall back to the model price, reported as unverified
+      }
+      const nl = out.lastIndexOf("\n");
+      const status = Number(out.slice(nl + 1));
+      if (status === 429) {
+        rateLimited++;
+        if (attempt < BACKOFF_MS.length) {
+          console.log(`  [steam 429 on "${name}", backing off ${BACKOFF_MS[attempt] / 1000}s]`);
+          sleep(BACKOFF_MS[attempt]);
+          continue;
+        }
+        throttled = true;
+        console.log(`  [steam still rate-limited, no further requests this run]`);
+        return null;
+      }
+      let j: { success?: boolean; lowest_price?: string; median_price?: string; volume?: string } = {};
+      try {
+        j = JSON.parse(out.slice(0, nl));
+      } catch {
+        return null;
+      }
+      const r = {
+        at: Date.now(),
+        lowest: money2(j.lowest_price),
+        median: money2(j.median_price),
+        volume: j.volume ? Number(j.volume.replace(/[^0-9]/g, "")) || 0 : 0,
+      };
+      cache[name] = r;
+      writeFileSync(CACHE, JSON.stringify(cache)); // survive a killed run
+      return r;
     }
-    const r = {
-      at: Date.now(),
-      lowest: money2(j.lowest_price),
-      median: money2(j.median_price),
-      volume: j.volume ? Number(j.volume.replace(/[^0-9]/g, "")) || 0 : 0,
-    };
-    cache[name] = r;
-    return r;
+    return null;
   }
 
   console.log(`\n── live Steam check: top ${Math.min(VERIFY, verified.length)} ${VENUE === "steam" ? "" : "(model is third-party; Steam shown for comparison) "}──`);
   console.log(`  buy = Steam lowest listing × edge premium at the cap;  sell = min(Steam median, lowest listing) / 1.15\n`);
   const rows = verified.slice(0, VERIFY).map(({ h, v }, i) => {
     const lines: string[] = [];
+    let missing = 0;
     const check = (label: string, sk: Skin, wear: string, model: number, f: number, side: "buy" | "sell") => {
       const r = live(`${sk.name} (${wear})`);
       // Selling: a median above the cheapest listing isn't reachable, you'd have to
@@ -599,6 +631,7 @@ if (VERIFY > 0) {
       const px = r ? (side === "buy" ? r.lowest ?? r.median : sellPx) : null;
       const val = px == null ? null : side === "buy" ? px * edgeFactor(gradeOf(sk, f).dist) : px / 1.15;
       const diff = val == null ? null : val / model - 1;
+      if (val == null) missing++;
       lines.push(
         `    ${label} ${`${sk.name} (${WEAR_ABBR[wear]})`.padEnd(40)} model ${money(model).padStart(8)}  live ${val == null ? "      —" : money(val).padStart(8)}` +
           `${diff == null ? "" : `  ${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(0)}%`.padEnd(8)}` +
@@ -627,14 +660,18 @@ if (VERIFY > 0) {
     const pWin = liveOut.filter((x) => x.val > cost).reduce((a, x) => a + x.p, 0);
     console.log(
       `#${i + 1}  model: cost ${money(v.cost)} EV ${money(v.ev)} RTP ${((v.ev / v.cost) * 100).toFixed(0)}%   →   live: cost ${money(cost)} EV ${money(ev)} RTP ${((ev / cost) * 100).toFixed(0)}% P(profit) ${pct(pWin)}` +
-        `   ${ev > cost ? "HOLDS" : "DEAD"}`,
+        `   ${missing ? `UNVERIFIED (${missing} price${missing > 1 ? "s" : ""} not fetched)` : ev > cost ? "HOLDS" : "DEAD"}`,
     );
     for (const l of lines) console.log(l);
     console.log("");
-    return { i, ev, cost };
+    return { i, ev, cost, missing };
   });
   mkdirSync("node_modules/.cache", { recursive: true });
   writeFileSync(CACHE, JSON.stringify(cache));
-  const holds = rows.filter((r) => r.ev > r.cost);
-  console.log(`  ${holds.length} of ${rows.length} hold at live Steam prices   (${calls} Steam requests, rest from cache)\n`);
+  const holds = rows.filter((r) => !r.missing && r.ev > r.cost);
+  const unverified = rows.filter((r) => r.missing).length;
+  console.log(
+    `  ${holds.length} of ${rows.length} hold at live Steam prices${unverified ? `, ${unverified} unverified` : ""}` +
+      `   (${calls} Steam requests, ${rateLimited} rate-limited, rest from cache)\n`,
+  );
 }
