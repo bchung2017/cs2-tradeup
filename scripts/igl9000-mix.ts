@@ -618,13 +618,14 @@ function liveCheck(v: ValuedContract, title: string): { ev: number; cost: number
   for (const o of v.outcomes) {
     const sk = skinById.get(o.skinId)!;
     const model = o.bidNet ?? 0;
-    if (!(model > v.cost || model >= 0.5 * v.cost)) {
+    // an outcome the feed couldn't price is checked too: it may be the winner
+    if (o.bidNet != null && model < 0.5 * v.cost) {
       ev += o.probability * model;
       liquidEv += o.probability * model;
       outs.push({ p: o.probability, val: model, liquid: true });
       continue;
     }
-    const r = market.priceOverview(`${sk.name} (${o.wear})`);
+    const r = market.gradeQuote(`${sk.name} (${o.wear})`);
     // Selling: a median above the cheapest listing isn't reachable, you'd have to
     // match or undercut that listing to sell, so take the lower of the two.
     const px = r && (r.median ?? r.lowest) != null ? Math.min(r.median ?? Infinity, r.lowest ?? Infinity) : null;
@@ -634,9 +635,9 @@ function liveCheck(v: ValuedContract, title: string): { ev: number; cost: number
     ev += o.probability * val;
     liquidEv += o.probability * (liquid ? val : 0);
     outs.push({ p: o.probability, val, liquid });
-    const diff = px == null ? null : val / model - 1;
+    const diff = px == null || o.bidNet == null ? null : val / model - 1;
     lines.push(
-      `    out ${pct(o.probability).padStart(6)} ${`${sk.name} (${WEAR_ABBR[o.wear]})`.padEnd(44)} model ${money(model).padStart(8)}  live ${px == null ? "      —" : money(val).padStart(8)}` +
+      `    out ${pct(o.probability).padStart(6)} ${`${sk.name} (${WEAR_ABBR[o.wear]})`.padEnd(44)} model ${(o.bidNet == null ? "—" : money(model)).padStart(8)}  live ${px == null ? "      —" : money(val).padStart(8)}` +
         `${diff == null ? "" : `  ${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(0)}%`.padEnd(8)}${r ? `  vol24h ${r.volume}` : "  (no data)"}${liquid ? "" : "  ⚠ no sales: counted as 0"}`,
     );
   }

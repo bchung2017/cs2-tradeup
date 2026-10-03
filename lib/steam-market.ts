@@ -54,27 +54,51 @@ interface RawListing {
   asset?: { asset_properties?: { propertyid: number; float_value?: number }[] };
 }
 interface SearchPage { total_count: number; more: boolean; listings: RawListing[] }
+export interface Sale { time: number; price_median: number; purchases: number } // hourly, buyer-paid USD
+export interface Book { minSell: number | null; maxBuy: number | null } // USD, buyer-paid
+export interface MarketPage {
+  search: SearchPage | null | undefined; // undefined = page has no listing search; null = it failed to load
+  history: Map<string, Sale[]>; // every bucket in the item group, by market_hash_name
+  books: Map<string, Book>;
+}
 
-// null = the page rendered but its listings query carried no data (Steam's soft
-// failure under load): treat as unfetched. A page without the query at all means
-// the format changed, and that throws.
-export function parseListingsPage(html: string): SearchPage | null {
+// Reads the react-query cache the market page renders into window.SSR.renderContext.
+// Throws when that cache is missing (the format changed) rather than guessing.
+export function parseMarketPage(html: string): MarketPage {
   const marker = "window.SSR.renderContext=JSON.parse(";
   const at = html.indexOf(marker);
-  if (at < 0) throw new Error("steam listings page: renderContext not found");
+  if (at < 0) throw new Error("steam market page: renderContext not found");
   // JSON.parse("...") wraps a JSON string literal; read exactly that literal.
   let end = at + marker.length + 1;
   while (end < html.length && html[end] !== '"') end += html[end] === "\\" ? 2 : 1;
   const ctx = JSON.parse(JSON.parse(html.slice(at + marker.length, end + 1)));
-  const queries: { queryKey: unknown[]; state: { data: { pages?: SearchPage[] } | null } }[] = JSON.parse(ctx.queryData).queries;
-  const q = queries.find((x) => x.queryKey[0] === "market_item_search");
-  if (!q) throw new Error("steam listings page: market_item_search query missing");
-  if (q.state.data == null) return null;
-  const page = q.state.data.pages?.[0];
-  if (!page || !Array.isArray(page.listings) || typeof page.total_count !== "number") {
-    throw new Error("steam listings page: market_item_search page missing or reshaped");
+  type Data = { pages?: SearchPage[]; prices?: Sale[]; amtMinSellOrder?: number; amtMaxBuyOrder?: number } | null;
+  const queries: { queryKey: unknown[]; state: { data: Data } }[] = JSON.parse(ctx.queryData).queries;
+  const out: MarketPage = { search: undefined, history: new Map(), books: new Map() };
+  const cents = (n?: number) => (typeof n === "number" ? n / 100 : null);
+  for (const { queryKey: k, state } of queries) {
+    if (k[0] === "market_item_search") {
+      const page = state.data?.pages?.[0];
+      if (state.data == null) out.search = null;
+      else if (!page || !Array.isArray(page.listings) || typeof page.total_count !== "number") {
+        throw new Error("steam market page: market_item_search reshaped");
+      } else out.search = page;
+    } else if (k[0] === "market" && k[1] === "pricehistory" && Array.isArray(state.data?.prices)) {
+      out.history.set(String(k[3]), state.data!.prices!);
+    } else if (k[0] === "market" && k[1] === "orderbook" && state.data) {
+      out.books.set(String(k[3]), { minSell: cents(state.data.amtMinSellOrder), maxBuy: cents(state.data.amtMaxBuyOrder) });
+    }
   }
-  return page;
+  return out;
+}
+
+// Purchase-weighted median of the last 24 h of hourly medians.
+export function lastDay(sales: Sale[], now = Date.now() / 1000): { median: number | null; volume: number } {
+  const day = sales.filter((x) => x.time >= now - 86400 && x.purchases > 0).sort((a, b) => a.price_median - b.price_median);
+  const volume = day.reduce((a, x) => a + x.purchases, 0);
+  let seen = 0;
+  for (const x of day) if ((seen += x.purchases) >= volume / 2) return { median: x.price_median, volume };
+  return { median: null, volume };
 }
 
 export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } = {}) {
@@ -153,8 +177,9 @@ export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } 
         });
         const html = get(`https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}?${qs}`, `${name} ≤${hi.toFixed(3)}`);
         if (html == null) return null;
-        const page = parseListingsPage(html);
-        if (!page) return null;
+        const page = parseMarketPage(html).search;
+        if (page === undefined) throw new Error(`steam market page: no listing search for "${name}"`);
+        if (page === null) return null; // Steam's soft failure under load: unfetched
         total = page.total_count;
         for (const l of page.listings) {
           const f = l.asset?.asset_properties?.find((p) => p.propertyid === 2)?.float_value;
@@ -169,5 +194,21 @@ export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } 
     });
   }
 
-  return { priceOverview, cheapestAtFloat, stats };
+  // Same fields as priceOverview, read from the listings page: the cheapest
+  // non-StatTrak listing of that wear, and the last 24 h of sales. priceoverview
+  // rate-limits far sooner than the page does.
+  function gradeQuote(name: string): Overview | null {
+    return cached(`grade|${name}`, () => {
+      const html = get(`https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}`, name);
+      if (html == null) return null;
+      const page = parseMarketPage(html);
+      const book = page.books.get(name);
+      const sales = page.history.get(name);
+      if (!book && !sales) return null;
+      const { median, volume } = lastDay(sales ?? []);
+      return { lowest: book?.minSell ?? null, median, volume };
+    });
+  }
+
+  return { priceOverview, gradeQuote, cheapestAtFloat, stats };
 }
