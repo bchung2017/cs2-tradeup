@@ -681,12 +681,12 @@ function liveCheck(v: ValuedContract): LiveRow {
   const [verdict, rank] = missing
     ? [`UNVERIFIED (${missing} price${missing > 1 ? "s" : ""} not fetched)`, 2]
     : shortBy
-      ? [`SHORT (${shortBy} input${shortBy > 1 ? "s" : ""} not listed under the cap)`, 4]
+      ? [`SHORT (${shortBy} input${shortBy > 1 ? "s" : ""} not listed under the cap)`, 3]
       : liquidEv > cost
         ? ["HOLDS", 0]
         : ev > cost
           ? ["PAPER ONLY (needs outcomes with no sales)", 1]
-          : ["DEAD", 3];
+          : ["DEAD", 2];
   const head =
     `model: cost ${money(v.cost)} EV ${money(v.ev)} RTP ${((v.ev / v.cost) * 100).toFixed(0)}%   →   live: cost ${money(cost)} EV ${money(liquidEv)}` +
     `${liquidEv !== ev ? ` (${money(ev)} incl. unsold)` : ""} RTP ${((liquidEv / cost) * 100).toFixed(0)}% P(profit) ${pct(pWin)}   ${verdict}`;
@@ -697,7 +697,7 @@ if (VERIFY > 0 && !CONTRACT) {
   const pool = byOutcomes.slice(0, VERIFY);
   console.log(`\n── live Steam check: top ${pool.length} by model, ranked by live result ${VENUE === "steam" ? "" : "(model is third-party; Steam shown for comparison) "}──`);
   console.log(`  buy = the n cheapest Steam listings with float in [grade bottom, cap];  sell = min(Steam median, lowest listing) / 1.15`);
-  console.log(`  order: HOLDS, PAPER ONLY, UNVERIFIED, DEAD, SHORT; then live RTP\n`);
+  console.log(`  order: HOLDS, PAPER ONLY, then DEAD and UNVERIFIED together by live RTP, SHORT last\n`);
   const rows = pool.map(({ v }, i) => ({ model: i + 1, ...liveCheck(v) }));
   rows.sort((a, b) => a.rank - b.rank || b.ev / b.cost - a.ev / a.cost);
   rows.forEach((r, i) => {
