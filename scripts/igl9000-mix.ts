@@ -457,7 +457,7 @@ function floatWindow(v: ValuedContract): { tLo: number; tHi: number } {
   return { tLo: lo / n, tHi: hi / n };
 }
 
-const verified = hits
+const byOutcomes = hits
   .sort((a, b) => b.ev / b.cost - a.ev / a.cost)
   .filter((h) => {
     const key = [h.tier, ...new Set(h.slots.map((x) => x.col.id))].sort().join("|");
@@ -488,7 +488,13 @@ const verified = hits
     if (seenWins.has(key)) return false;
     seenWins.add(key);
     return true;
-  })
+  });
+// The live check takes candidates before the family collapse: two contracts on
+// the same anchor collection differ in their fillers and caps, and live prices
+// can rank them in the opposite order (Arabesque + Revolution at $21 sat hidden
+// behind Anubis + Revolution at $40).
+
+const verified = byOutcomes
   .filter((x) => {
     const key = `${x.h.tier}|${dominant(x.h).id}`;
     variants.set(key, (variants.get(key) ?? 0) + 1);
@@ -575,10 +581,37 @@ verified.forEach(({ h, v, wins, pWin, robust, rtp }, i) => {
 // contract cost) is checked; the rest keep the model price.
 const market = steamMarket({ gapMs: Number(arg("steam-gap") ?? 8) * 1000 });
 
-function liveCheck(v: ValuedContract, title: string): { ev: number; cost: number; ok: boolean; missing: number } {
+// Mean normalized input float, and how far it may rise before any outcome
+// changes wear. Σ over the inputs is what a buyer has to keep under.
+function floatMargin(v: ValuedContract): { T: number; tMax: number } {
+  const n = v.contract.slots.length;
+  const T = v.contract.slots.reduce((a, s) => a + norm(s.float, skinById.get(s.skinId)!), 0) / n;
+  let tMax = 1;
+  for (const o of v.outcomes) {
+    const sk = skinById.get(o.skinId)!;
+    for (const b of BOUNDARIES) {
+      const t = (b - sk.min_float) / (sk.max_float - sk.min_float);
+      if (t > T && t < tMax) tMax = t;
+    }
+  }
+  return { T, tMax };
+}
+
+interface LiveRow { head: string; lines: string[]; ev: number; cost: number; verdict: string; rank: number; missing: number }
+
+// Prices one contract live and returns the report instead of printing it, so the
+// caller can rank contracts by what Steam says rather than by the model.
+function liveCheck(v: ValuedContract): LiveRow {
   const lines: string[] = [];
   let missing = 0;
-  let short = 0;
+  let shortBy = 0;
+  const n = v.contract.slots.length;
+  const { T, tMax } = floatMargin(v);
+  const names = [...new Set(v.contract.slots.map((s) => short(colsOf(skinById.get(s.skinId)!)[0]?.name ?? "?")))];
+  lines.push(`    ${v.contract.tier} → ${v.outputRarity}   ${names.join(" + ")}`);
+  lines.push(
+    `    float: adjusted ${T.toFixed(5)}   Σ ${(T * n).toFixed(4)} of ${(tMax * n).toFixed(4)} before the first outcome changes wear (margin ${((tMax - T) * n).toFixed(4)})`,
+  );
   const groups = new Map<string, { sk: Skin; wear: Wear; cap: number; n: number }>();
   for (const sl of v.contract.slots) {
     const sk = skinById.get(sl.skinId)!;
@@ -605,7 +638,7 @@ function liveCheck(v: ValuedContract, title: string): { ev: number; cost: number
     // a shortfall is priced at the model so the totals stay comparable; the
     // contract is marked SHORT either way
     cost += paid + (n - got.length) * model;
-    if (got.length < n) short += n - got.length;
+    if (got.length < n) shortBy += n - got.length;
     const range = got.length ? `${money(got[0].price)}–${money(got[got.length - 1].price)}` : "none";
     lines.push(
       `${head}   live ${got.length ? money(paid / got.length).padStart(7) : "      —"} ea (${range})   ${book.total} listed in range` +
@@ -615,14 +648,16 @@ function liveCheck(v: ValuedContract, title: string): { ev: number; cost: number
   let ev = 0;
   let liquidEv = 0;
   const outs: { p: number; val: number; liquid: boolean }[] = [];
-  for (const o of v.outcomes) {
+  for (const o of [...v.outcomes].sort((a, b) => (b.bidNet ?? Infinity) - (a.bidNet ?? Infinity))) {
     const sk = skinById.get(o.skinId)!;
     const model = o.bidNet ?? 0;
+    const label = `    out ${pct(o.probability).padStart(6)} ${`${sk.name} (${WEAR_ABBR[o.wear]} ${o.float.toFixed(4)})`.padEnd(48)}`;
     // an outcome the feed couldn't price is checked too: it may be the winner
     if (o.bidNet != null && model < 0.5 * v.cost) {
       ev += o.probability * model;
       liquidEv += o.probability * model;
       outs.push({ p: o.probability, val: model, liquid: true });
+      lines.push(`${label} model ${money(model).padStart(8)}  (not checked: under half the cost)`);
       continue;
     }
     const r = market.gradeQuote(`${sk.name} (${o.wear})`);
@@ -638,34 +673,39 @@ function liveCheck(v: ValuedContract, title: string): { ev: number; cost: number
     outs.push({ p: o.probability, val, liquid });
     const diff = px == null || o.bidNet == null ? null : val / model - 1;
     lines.push(
-      `    out ${pct(o.probability).padStart(6)} ${`${sk.name} (${WEAR_ABBR[o.wear]})`.padEnd(44)} model ${(o.bidNet == null ? "—" : money(model)).padStart(8)}  live ${px == null ? "      —" : money(val).padStart(8)}` +
+      `${label} model ${(o.bidNet == null ? "—" : money(model)).padStart(8)}  live ${px == null ? "      —" : money(val).padStart(8)}` +
         `${diff == null ? "" : `  ${diff >= 0 ? "+" : ""}${(diff * 100).toFixed(0)}%`.padEnd(8)}${r ? `  vol24h ${r.volume}` : "  (not fetched)"}${r && px == null ? "  ⚠ nothing listed or sold" : liquid ? "" : "  ⚠ no sales: counted as 0"}`,
     );
   }
   const pWin = outs.filter((x) => x.liquid && x.val > cost).reduce((a, x) => a + x.p, 0);
-  const verdict = missing
-    ? `UNVERIFIED (${missing} price${missing > 1 ? "s" : ""} not fetched)`
-    : short
-      ? `SHORT (${short} input${short > 1 ? "s" : ""} not listed under the cap)`
+  const [verdict, rank] = missing
+    ? [`UNVERIFIED (${missing} price${missing > 1 ? "s" : ""} not fetched)`, 2]
+    : shortBy
+      ? [`SHORT (${shortBy} input${shortBy > 1 ? "s" : ""} not listed under the cap)`, 4]
       : liquidEv > cost
-        ? "HOLDS"
+        ? ["HOLDS", 0]
         : ev > cost
-          ? "PAPER ONLY (needs outcomes with no sales)"
-          : "DEAD";
-  console.log(
-    `${title}  model: cost ${money(v.cost)} EV ${money(v.ev)} RTP ${((v.ev / v.cost) * 100).toFixed(0)}%   →   live: cost ${money(cost)} EV ${money(liquidEv)}` +
-      `${liquidEv !== ev ? ` (${money(ev)} incl. unsold)` : ""} RTP ${((liquidEv / cost) * 100).toFixed(0)}% P(profit) ${pct(pWin)}   ${verdict}`,
-  );
-  for (const l of lines) console.log(l);
-  console.log("");
-  return { ev: liquidEv, cost, ok: verdict === "HOLDS", missing };
+          ? ["PAPER ONLY (needs outcomes with no sales)", 1]
+          : ["DEAD", 3];
+  const head =
+    `model: cost ${money(v.cost)} EV ${money(v.ev)} RTP ${((v.ev / v.cost) * 100).toFixed(0)}%   →   live: cost ${money(cost)} EV ${money(liquidEv)}` +
+    `${liquidEv !== ev ? ` (${money(ev)} incl. unsold)` : ""} RTP ${((liquidEv / cost) * 100).toFixed(0)}% P(profit) ${pct(pWin)}   ${verdict}`;
+  return { head, lines, ev: liquidEv, cost, verdict, rank: rank as number, missing };
 }
 
 if (VERIFY > 0 && !CONTRACT) {
-  console.log(`\n── live Steam check: top ${Math.min(VERIFY, verified.length)} ${VENUE === "steam" ? "" : "(model is third-party; Steam shown for comparison) "}──`);
-  console.log(`  buy = the n cheapest Steam listings with float in [grade bottom, cap];  sell = min(Steam median, lowest listing) / 1.15\n`);
-  const rows = verified.slice(0, VERIFY).map(({ v }, i) => liveCheck(v, `#${i + 1}`));
-  const holds = rows.filter((r) => r.ok).length;
+  const pool = byOutcomes.slice(0, VERIFY);
+  console.log(`\n── live Steam check: top ${pool.length} by model, ranked by live result ${VENUE === "steam" ? "" : "(model is third-party; Steam shown for comparison) "}──`);
+  console.log(`  buy = the n cheapest Steam listings with float in [grade bottom, cap];  sell = min(Steam median, lowest listing) / 1.15`);
+  console.log(`  order: HOLDS, PAPER ONLY, UNVERIFIED, DEAD, SHORT; then live RTP\n`);
+  const rows = pool.map(({ v }, i) => ({ model: i + 1, ...liveCheck(v) }));
+  rows.sort((a, b) => a.rank - b.rank || b.ev / b.cost - a.ev / a.cost);
+  rows.forEach((r, i) => {
+    console.log(`#${i + 1} (model #${r.model})  ${r.head}`);
+    for (const l of r.lines) console.log(l);
+    console.log("");
+  });
+  const holds = rows.filter((r) => r.rank === 0).length;
   const unverified = rows.filter((r) => r.missing).length;
   const { calls, rateLimited } = market.stats;
   console.log(
@@ -699,24 +739,10 @@ if (CONTRACT) {
   );
   if (!v) throw new Error("--contract: not a valid trade-up (mixed rarities, wrong count, or no outputs)");
 
-  // Mean normalized float, and how far it can rise before any outcome changes wear.
-  const T = slots.reduce((a, s) => a + norm(s.float, skinById.get(s.skinId)!), 0) / slots.length;
-  let tMax = 1;
-  for (const o of v.outcomes) {
-    const sk = skinById.get(o.skinId)!;
-    for (const b of BOUNDARIES) {
-      const t = (b - sk.min_float) / (sk.max_float - sk.min_float);
-      if (t > T && t < tMax) tMax = t;
-    }
-  }
-  console.log(`\nIGL-9000 · one contract   ${v.contract.tier} → ${v.outputRarity}   ${names.map(short).join(" + ")}   model venue ${VENUE}`);
-  console.log(
-    `  adjusted float ${T.toFixed(5)}   Σ ${(T * slots.length).toFixed(4)} of ${(tMax * slots.length).toFixed(4)} before the first outcome changes wear` +
-      `   (margin ${((tMax - T) * slots.length).toFixed(4)})`,
-  );
-  for (const o of [...v.outcomes].sort((a, b) => (b.bidNet ?? 0) - (a.bidNet ?? 0))) {
-    console.log(`    ${pct(o.probability).padStart(6)}  ${o.float.toFixed(5)} ${WEAR_ABBR[o.wear].padEnd(3)} ${o.name}`);
-  }
+  const r = liveCheck(v);
+  console.log(`\nIGL-9000 · one contract   model venue ${VENUE}`);
+  console.log(`contract  ${r.head}`);
+  for (const l of r.lines) console.log(l);
   console.log("");
-  liveCheck(v, "contract");
+
 }

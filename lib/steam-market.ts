@@ -34,6 +34,7 @@ const CACHE = "node_modules/.cache/igl9000-steam.json";
 const TTL = 6 * 3600e3;
 const BACKOFF_MS = [60_000, 120_000];
 const PAGE = 20;
+const PAGE_TRIES = 3;
 
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const usd = (s?: string) => (s ? Number(s.replace(/[^0-9.]/g, "")) || null : null);
@@ -136,6 +137,20 @@ export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } 
     return null;
   }
 
+  // A market page, retried while the part we need is missing. Steam sometimes
+  // serves the page without its listing search, or with it unloaded; a second
+  // request usually has it. Still missing after the retries: unfetched, never a guess.
+  function getPage(url: string, label: string, has: (p: MarketPage) => unknown): MarketPage | null {
+    for (let attempt = 0; attempt < PAGE_TRIES; attempt++) {
+      const html = get(url, label);
+      if (html == null) return null;
+      const page = parseMarketPage(html);
+      if (has(page)) return page;
+      log(`  [steam page for "${label}" came back incomplete${attempt + 1 < PAGE_TRIES ? ", retrying" : ", giving up"}]`);
+    }
+    return null;
+  }
+
   function cached<T>(key: string, load: () => T | null): T | null {
     const hit = cache[key];
     if (hit && Date.now() - hit.at < TTL) return hit.v as T;
@@ -175,15 +190,8 @@ export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } 
           category_Exterior: `WearCategory${w}`,
           start: String(start),
         });
-        const html = get(`https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}?${qs}`, `${name} ≤${hi.toFixed(3)}`);
-        if (html == null) return null;
-        const page = parseMarketPage(html).search;
-        // Steam sometimes serves the page without its listing search (undefined) or
-        // with the search unloaded (null). Either way: unfetched, never a guess.
-        if (!page) {
-          log(`  [steam page for "${name}" came back without listings]`);
-          return null;
-        }
+        const page = getPage(`https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}?${qs}`, `${name} ≤${hi.toFixed(3)}`, (p) => p.search)?.search;
+        if (!page) return null;
         total = page.total_count;
         for (const l of page.listings) {
           const f = l.asset?.asset_properties?.find((p) => p.propertyid === 2)?.float_value;
@@ -203,9 +211,8 @@ export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } 
   // rate-limits far sooner than the page does.
   function gradeQuote(name: string): Overview | null {
     return cached(`grade|${name}`, () => {
-      const html = get(`https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}`, name);
-      if (html == null) return null;
-      const page = parseMarketPage(html);
+      const page = getPage(`https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}`, name, (p) => p.books.get(name) ?? p.history.get(name));
+      if (!page) return null;
       const book = page.books.get(name);
       const sales = page.history.get(name);
       if (!book && !sales) return null;
