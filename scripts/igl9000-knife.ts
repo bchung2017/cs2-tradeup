@@ -25,7 +25,8 @@
 import { WEAR_RANGES, type PriceTable, type Skin, type Wear } from "@/types/cs2";
 import { loadPrices, loadSkins } from "@/lib/data";
 import { floatToWear } from "@/lib/tradeup";
-import { FEEDS, loadFeed, phasesOf, quoteOf } from "@/lib/third-party-feeds";
+import { FEEDS, loadFeed, quoteOf } from "@/lib/third-party-feeds";
+import { buildPools, colsOf, knifeValuer, type Pool, type Value } from "@/lib/igl9000-knife";
 import { steamMarket } from "@/lib/steam-market";
 
 const argv = process.argv.slice(2);
@@ -41,7 +42,6 @@ const MIN_DEPTH = Number(arg("min-depth") ?? 0.1); // never buy in the bottom 10
 const SHOW_T = arg("show-t"); // a collection name ("Fever"): print every float target it was priced at
 const N = 5;
 const BOUNDARIES = WEAR_RANGES.slice(0, -1).map((w) => w.max);
-const EXCLUDED = "Limited Edition Item";
 
 const skins: Skin[] = loadSkins();
 const prices: PriceTable = loadPrices();
@@ -51,50 +51,9 @@ const money = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigi
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 const ABBR: Record<string, string> = { "Factory New": "FN", "Minimal Wear": "MW", "Field-Tested": "FT", "Well-Worn": "WW", "Battle-Scarred": "BS" };
 const short = (n: string) => n.replace(/^The /, "").replace(/ Collection$/, "");
-const colsOf = (s: Skin) => s.collections.filter((c) => c.name !== EXCLUDED);
 
-// ── outcome values ──────────────────────────────────────────────────────────
-interface Value { fast: number | null; patient: number | null; phases?: { phase: string; fast: number | null }[] }
-const valueCache = new Map<string, Value>();
-function sale(name: string, phase?: string): { fast: number | null; patient: number | null } {
-  const { ask, bid } = quoteOf(tables, name, phase);
-  const fast = bid == null ? null : bid * (1 - FEE);
-  // a lone ask far above the buy orders is a hope, not a price
-  const patient = ask == null ? fast : bid != null && ask > 3 * bid ? fast : ask * (1 - FEE);
-  return { fast: fast ?? patient, patient };
-}
-function valueOf(knife: Skin, wear: Wear): Value {
-  const name = `${knife.name} (${wear})`;
-  const hit = valueCache.get(name);
-  if (hit) return hit;
-  const phases = phasesOf(knife.name);
-  let v: Value;
-  if (!phases) v = sale(name);
-  else {
-    const per = phases.map((phase) => ({ phase, ...sale(name, phase) }));
-    const ok = per.every((p) => p.fast != null);
-    v = {
-      fast: ok ? per.reduce((a, p) => a + p.fast!, 0) / per.length : null,
-      patient: ok ? per.reduce((a, p) => a + (p.patient ?? p.fast!), 0) / per.length : null,
-      phases: per.map(({ phase, fast }) => ({ phase, fast })),
-    };
-  }
-  valueCache.set(name, v);
-  return v;
-}
-
-// ── collections: Covert inputs and their knife pool ─────────────────────────
-interface Pool { id: string; name: string; inputs: Skin[]; knives: Skin[] }
-const pools = new Map<string, Pool>();
-for (const s of skins) {
-  if (s.souvenir) continue;
-  for (const c of colsOf(s)) {
-    const p = pools.get(c.id) ?? { id: c.id, name: c.name, inputs: [], knives: [] };
-    if (s.rarity.name === "Covert" && colsOf(s).length === 1) p.inputs.push(s);
-    if (s.rarity.name === "Extraordinary" && !p.knives.some((k) => k.name === s.name)) p.knives.push(s); // Doppler rows collapse to one name
-    pools.set(c.id, p);
-  }
-}
+const { valueOf } = knifeValuer(tables, FEE);
+const pools = buildPools(skins);
 
 const steamFeed = (s: Skin, wear: string) => {
   const v = prices[`${s.id}|${wear}|norm`]?.sources?.steam;
@@ -131,7 +90,6 @@ interface Contract { pool: Pool; T: number; cash: Input; steam: Input | null; ou
 
 const contracts: Contract[] = [];
 for (const p of pools.values()) {
-  if (!p.inputs.length || !p.knives.length) continue;
   const Ts = new Set<number>([1]);
   for (const k of p.knives) {
     for (const b of BOUNDARIES) {
