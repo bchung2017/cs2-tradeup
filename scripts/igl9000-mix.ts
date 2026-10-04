@@ -6,6 +6,7 @@
  *                                  [--venue third-party|steam] [--edge-mult 1] [--edge-band 0.03]
  *                                  [--verify-steam K] [--steam-gap 8]   live-check the top K against Steam
  *                                  [--min-rtp 0.85]   also keep near-misses down to this model RTP
+ *                                  [--json out.json]  with --verify-steam: write checked contracts as Venture rows
  *   npx tsx scripts/igl9000-mix.ts --contract "9x MAC-10 | Sakkaku@0.24, 1x Negev | Lionfish@0.11"
  *                                  value one given contract and live-check it (skips the sweep)
  *
@@ -40,6 +41,8 @@ import { marketAvgPriceProvider, steamPriceProvider, type PriceProvider } from "
 import { valueContract, type CandidateContract, type ValuedContract } from "@/lib/igl9000-engine";
 import { floatToWear } from "@/lib/tradeup";
 import { steamMarket } from "@/lib/steam-market";
+import { pAhead, ventureKey, type Venture, type VentureInput, type VentureOutcome } from "@/lib/ventures";
+import { writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
 const arg = (k: string) => {
@@ -60,6 +63,7 @@ const SORT = arg("sort") === "pwin" ? "pwin" : "rtp";
 const MIN_RTP = Number(arg("min-rtp") ?? 1);
 const keep = (ev: number, cost: number) => (MIN_RTP >= 1 ? ev > cost : ev >= MIN_RTP * cost);
 const CONTRACT = arg("contract");
+const JSON_OUT = arg("json"); // with --verify-steam: write the checked contracts as Venture rows
 // Edge premium: floats just past a wear boundary look like the better grade and
 // are priced like it. First run (2026-09-29) paid 3.4-5.4x the model for P250
 // Red Tide FT @0.17 and MAG-7 Resupply MW @0.08, both within 0.02 of a boundary.
@@ -583,21 +587,22 @@ const market = steamMarket({ gapMs: Number(arg("steam-gap") ?? 8) * 1000 });
 
 // Mean normalized input float, and how far it may rise before any outcome
 // changes wear. Σ over the inputs is what a buyer has to keep under.
-function floatMargin(v: ValuedContract): { T: number; tMax: number } {
+function floatMargin(v: ValuedContract): { T: number; tMax: number; first: string | null } {
   const n = v.contract.slots.length;
   const T = v.contract.slots.reduce((a, s) => a + norm(s.float, skinById.get(s.skinId)!), 0) / n;
   let tMax = 1;
+  let first: string | null = null;
   for (const o of v.outcomes) {
     const sk = skinById.get(o.skinId)!;
     for (const b of BOUNDARIES) {
       const t = (b - sk.min_float) / (sk.max_float - sk.min_float);
-      if (t > T && t < tMax) tMax = t;
+      if (t > T && t < tMax) { tMax = t; first = sk.name; }
     }
   }
-  return { T, tMax };
+  return { T, tMax, first };
 }
 
-interface LiveRow { head: string; lines: string[]; ev: number; cost: number; verdict: string; rank: number; missing: number }
+interface LiveRow { head: string; lines: string[]; ev: number; cost: number; verdict: string; rank: number; missing: number; venture: Venture }
 
 // Prices one contract live and returns the report instead of printing it, so the
 // caller can rank contracts by what Steam says rather than by the model.
@@ -606,7 +611,9 @@ function liveCheck(v: ValuedContract): LiveRow {
   let missing = 0;
   let shortBy = 0;
   const n = v.contract.slots.length;
-  const { T, tMax } = floatMargin(v);
+  const { T, tMax, first } = floatMargin(v);
+  const vInputs: VentureInput[] = [];
+  const vOutcomes: VentureOutcome[] = [];
   const names = [...new Set(v.contract.slots.map((s) => short(colsOf(skinById.get(s.skinId)!)[0]?.name ?? "?")))];
   lines.push(`    ${v.contract.tier} → ${v.outputRarity}   ${names.join(" + ")}`);
   lines.push(
@@ -627,10 +634,12 @@ function liveCheck(v: ValuedContract): LiveRow {
     const model = buyQuote(sk.id, wear, false, cap)?.ask ?? 0;
     const book = market.cheapestAtFloat(`${sk.name} (${wear})`, lo, cap, n);
     const head = `    in  ${String(n).padStart(2)}× ${`${sk.name} (${WEAR_ABBR[wear]}) ${lo.toFixed(3)}–${cap.toFixed(3)}`.padEnd(48)} model ${money(model).padStart(7)} ea`;
+    const vin = { skin: sk.name, skinId: sk.id, collection: colsOf(sk)[0]?.name ?? "", rarity: sk.rarity.name, wear, count: n, floatMin: lo, floatMax: cap };
     if (!book) {
       missing++;
       cost += model * n;
       lines.push(`${head}   live —  (not fetched)`);
+      vInputs.push({ ...vin, priceEach: model, basis: "steam-feed", listed: null });
       continue;
     }
     const got = book.listings;
@@ -639,6 +648,7 @@ function liveCheck(v: ValuedContract): LiveRow {
     // contract is marked SHORT either way
     cost += paid + (n - got.length) * model;
     if (got.length < n) shortBy += n - got.length;
+    vInputs.push({ ...vin, priceEach: got.length ? paid / got.length : null, basis: "steam-listings", listed: book.total });
     const range = got.length ? `${money(got[0].price)}–${money(got[got.length - 1].price)}` : "none";
     lines.push(
       `${head}   live ${got.length ? money(paid / got.length).padStart(7) : "      —"} ea (${range})   ${book.total} listed in range` +
@@ -658,6 +668,7 @@ function liveCheck(v: ValuedContract): LiveRow {
       liquidEv += o.probability * model;
       outs.push({ p: o.probability, val: model, liquid: true });
       lines.push(`${label} model ${money(model).padStart(8)}  (not checked: under half the cost)`);
+      vOutcomes.push(ventureOutcome(o, model, false, null));
       continue;
     }
     const r = market.gradeQuote(`${sk.name} (${o.wear})`);
@@ -671,6 +682,7 @@ function liveCheck(v: ValuedContract): LiveRow {
     ev += o.probability * val;
     liquidEv += o.probability * (liquid ? val : 0);
     outs.push({ p: o.probability, val, liquid });
+    vOutcomes.push(ventureOutcome(o, val, r != null, r?.volume ?? null));
     const diff = px == null || o.bidNet == null ? null : val / model - 1;
     lines.push(
       `${label} model ${(o.bidNet == null ? "—" : money(model)).padStart(8)}  live ${px == null ? "      —" : money(val).padStart(8)}` +
@@ -690,7 +702,48 @@ function liveCheck(v: ValuedContract): LiveRow {
   const head =
     `model: cost ${money(v.cost)} EV ${money(v.ev)} RTP ${((v.ev / v.cost) * 100).toFixed(0)}%   →   live: cost ${money(cost)} EV ${money(liquidEv)}` +
     `${liquidEv !== ev ? ` (${money(ev)} incl. unsold)` : ""} RTP ${((liquidEv / cost) * 100).toFixed(0)}% P(profit) ${pct(pWin)}   ${verdict}`;
-  return { head, lines, ev: liquidEv, cost, verdict, rank: rank as number, missing };
+  for (const vo of vOutcomes) vo.win = vo.value != null && vo.value > cost && vo.sold24h !== 0;
+  const best = vOutcomes.reduce((a, o) => ((o.value ?? 0) > (a.value ?? 0) ? o : a));
+  const venture: Venture = {
+    key: ventureKey(v.contract.tier, vInputs),
+    source: "sweep",
+    tier: v.contract.tier,
+    outputTier: v.outputRarity,
+    size: n,
+    collections: [...new Set(vInputs.map((i) => i.collection))],
+    venue: "steam",
+    inputs: vInputs,
+    outcomes: vOutcomes.sort((a, b) => (b.value ?? 0) - (a.value ?? 0)),
+    float: { adjusted: T, sum: T * n, max: tMax * n, firstChange: first },
+    cost,
+    value: liquidEv,
+    valuePatient: null,
+    backPerDollar: liquidEv / cost,
+    pProfit: pWin,
+    pAhead: pAhead(outs.map((x) => ({ p: x.p, v: x.liquid ? x.val : 0 })), cost),
+    best: { name: best.name, wear: best.wear, value: best.value ?? 0, probability: best.probability },
+    rareShare: null,
+    verdict: missing ? "unverified" : shortBy ? "short" : liquidEv > cost ? "holds" : ev > cost ? "paper" : "dead",
+    warnings: [
+      ...(shortBy ? [`${shortBy} input${shortBy > 1 ? "s" : ""} not listed under the float cap`] : []),
+      ...(liquidEv !== ev ? ["some outcomes had no sales in 24h and count as $0"] : []),
+      ...((tMax - T) * n < 0.02 ? ["float budget is nearly used up: buy at or under the caps"] : []),
+      ...vInputs.filter((i) => i.basis === "steam-listings" && i.priceEach != null && i.priceEach > 1.25 * (buyQuote(i.skinId, i.wear as Wear, false, i.floatMax)?.ask ?? Infinity)).map((i) => `${i.skin} under ${i.floatMax.toFixed(3)} costs more than its grade price`),
+    ],
+    verifiedAt: new Date().toISOString(),
+    firstSeenAt: new Date().toISOString(),
+    sources: ["steam: market listings by float", "steam: order book + 24h sales", "feed: CSGOTrader steam medians (model)"],
+  };
+  return { head, lines, ev: liquidEv, cost, verdict, rank: rank as number, missing, venture };
+}
+
+function ventureOutcome(o: ValuedContract["outcomes"][number], value: number, checked: boolean, sold24h: number | null): VentureOutcome {
+  const sk = skinById.get(o.skinId)!;
+  return {
+    name: sk.name, skinId: sk.id, collection: colsOf(sk)[0]?.name ?? "", rarity: sk.rarity.name,
+    probability: o.probability, float: o.float, wear: o.wear, skinMin: sk.min_float, skinMax: sk.max_float,
+    value, checked, sold24h, win: false,
+  };
 }
 
 if (VERIFY > 0 && !CONTRACT) {
@@ -700,6 +753,7 @@ if (VERIFY > 0 && !CONTRACT) {
   console.log(`  order: HOLDS, PAPER ONLY, then DEAD and UNVERIFIED together by live RTP, SHORT last\n`);
   const rows = pool.map(({ v }, i) => ({ model: i + 1, ...liveCheck(v) }));
   rows.sort((a, b) => a.rank - b.rank || b.ev / b.cost - a.ev / a.cost);
+  if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify(rows.map((r) => r.venture)));
   rows.forEach((r, i) => {
     console.log(`#${i + 1} (model #${r.model})  ${r.head}`);
     for (const l of r.lines) console.log(l);

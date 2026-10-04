@@ -3,6 +3,7 @@ import "./globals.css";
 import { TradeupProvider } from "@/lib/tradeup-context";
 import TopRail from "@/components/TopRail";
 import CircuitBoard from "@/components/CircuitBoard";
+import VentureToast from "@/components/VentureToast";
 
 export const metadata: Metadata = {
   title: "CS2 Journeyman · Trade-Up Console",
@@ -34,6 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <TradeupProvider>
           <TopRail />
           {children}
+          <VentureToast />
         </TradeupProvider>
       </body>
     </html>

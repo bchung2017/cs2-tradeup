@@ -12,9 +12,9 @@
 //   2. IGL-9000's voice — copy generated FROM that data, in the register the
 //      design doc settles on (Artemis Fowl mastermind for IGL's lines; flat,
 //      undeniable Matrix math for the numbers).
-// Route *content* currently comes from `demoRoute()` — a deterministic preview
-// mirroring the design mock. Swap that one function for the planner output and
-// the whole surface lights up unchanged.
+// The route view and its demoRoute() preview were retired when Venture became a
+// list of live-checked contracts (components/venture/). The route model and the
+// voice stay for a multi-hop view once the JourneySim rollout exists.
 
 import { signedUsd, usd } from "@/lib/display";
 
@@ -135,66 +135,4 @@ function numberWord(n: number): string {
 }
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-// ── Route source ─────────────────────────────────────────────────────────────
-// PREVIEW route: deterministic, mirrors the design mock (route "alpha"). This is
-// the single seam to the live model — replace demoRoute() with the JourneyPlanner
-// + JourneySim output (see context/modeltechnicalbreakdown.md §5,§7) and every
-// consumer above keeps working. Marked isPreview so the UI can label it honestly.
-
-export const IS_PREVIEW_ROUTE = true;
-
-export function demoRoute(): Route {
-  const own10: SlotFill[] = Array(10).fill("own");
-  const hop2Slots: SlotFill[] = [...Array(8).fill("own"), "buy", "buy"];
-  const hop3Slots: SlotFill[] = [...Array(7).fill("own"), "wait", "wait", "wait"];
-
-  const destination: Destination = {
-    rarity: "Covert",
-    skinName: "AWP | Fever Dream",
-    wear: "Field-Tested",
-    floatApprox: 0.24,
-    payout: 38.5,
-    spread: { p10: 19, p50: 42, p90: 61 },
-    hitOdds: 0.2,
-    hitName: "the AWP",
-  };
-
-  const hops: Hop[] = [
-    {
-      hop: 1,
-      rarity: "Restricted",
-      contractSize: 10,
-      delta: 1.92,
-      slots: own10,
-      state: "armed",
-    },
-    {
-      hop: 2,
-      rarity: "Classified",
-      contractSize: 10,
-      delta: 3.4,
-      slots: hop2Slots,
-      state: "needs-buy",
-      need: { count: 2, buyCost: 6.3, unlockDays: 3 },
-    },
-    {
-      hop: 3,
-      rarity: "Covert",
-      contractSize: 10,
-      delta: 2.83,
-      slots: hop3Slots,
-      state: "locked",
-      waitsOn: "3 slots come from hop 2's payouts",
-    },
-  ];
-
-  return {
-    label: "alpha",
-    stash: { count: 23, sellNow: 27.35, used: 18 },
-    hops,
-    destination,
-    stats: { cashNeeded: 6.3, buyCount: 2, likelyEndValue: 41.8, netVsSelling: 8.15 },
-  };
 }

@@ -4,8 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTradeup } from "@/lib/tradeup-context";
+import { useBadge } from "@/lib/venture-store";
 
-function SurfaceLink({ href, label, active }: { href: string; label: string; active: boolean }) {
+function SurfaceLink({ href, label, active, badge }: { href: string; label: string; active: boolean; badge?: number }) {
   return (
     <Link
       href={href}
@@ -14,6 +15,7 @@ function SurfaceLink({ href, label, active }: { href: string; label: string; act
       style={{ textDecoration: "none", color: active ? "var(--green)" : "var(--fg-dim)", transition: "color 120ms" }}
     >
       {label}
+      {badge ? <span className="rail-badge" aria-label={`${badge} new`}>{badge}</span> : null}
     </Link>
   );
 }
@@ -21,6 +23,7 @@ function SurfaceLink({ href, label, active }: { href: string; label: string; act
 export default function TopRail() {
   const pathname = usePathname();
   const { steamid } = useTradeup();
+  const ventureBadge = useBadge();
   const [avatar, setAvatar] = useState<string | null>(null);
 
   useEffect(() => {
@@ -66,7 +69,7 @@ export default function TopRail() {
       <div style={{ display: "flex", gap: 16 }}>
         <SurfaceLink href="/" label="CONSOLE" active={pathname === "/"} />
         <SurfaceLink href="/inventory" label="INVENTORY" active={pathname === "/inventory"} />
-        <SurfaceLink href="/venture" label="VENTURE" active={pathname === "/venture"} />
+        <SurfaceLink href="/venture/market" label="VENTURE" active={pathname.startsWith("/venture")} badge={ventureBadge} />
       </div>
 
       <Link

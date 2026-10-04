@@ -48,18 +48,26 @@ jobs:
       - name: Market-average sync
         run: npx tsx scripts/sync-prices.ts ${{ github.event.inputs.force == 'false' && ' ' || '--force' }}
 
+      # Trade-up contracts for the Venture surface, priced against the prices
+      # just synced plus live Steam listings and third-party feeds. Best-effort:
+      # Steam rate limits leave some rows unverified rather than failing the job.
+      - name: Ventures (sweeps + live checks)
+        continue-on-error: true
+        run: npx tsx scripts/igl9000-ventures.ts --verify 30 --knife-verify 20 --steam-gap 8
+
       - name: Commit if prices moved
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- public/data; then
-            echo "no price changes — nothing to commit"
+          # status, not diff: the first ventures run creates untracked files
+          if [ -z "$(git status --porcelain -- public/data)" ]; then
+            echo "no price or venture changes — nothing to commit"
             exit 0
           fi
           # Coverage line in the job log, so a bad run is visible without
           # downloading the diff.
           node -e "const m=require('./public/data/prices.meta.json');console.log('meta:',JSON.stringify(m))"
-          git add public/data/prices.json public/data/prices.meta.json
-          git commit -m "chore(prices): market-average sync $(date -u +%Y-%m-%d)"
+          git add --all -- public/data
+          git commit -m "chore(prices): market-average sync + ventures $(date -u +%Y-%m-%d)"
           git push origin HEAD:${{ github.ref_name }}
