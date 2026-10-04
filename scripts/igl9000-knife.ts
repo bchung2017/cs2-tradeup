@@ -1,7 +1,7 @@
 /**
  * IGL-9000 — Covert ×5 → knife/glove sweep, priced off Steam.
  *
- *   npx tsx scripts/igl9000-knife.ts [--top 15] [--fee 0.025] [--max-cost 5000] [--min-depth 0.1]
+ *   npx tsx scripts/igl9000-knife.ts [--top 15] [--fee 0.025] [--max-cost 5000] [--min-depth 0.1] [--show-t Fever]
  *                                    [--verify-steam K] [--steam-gap 8]
  *
  * Steam caps listings near $1,800 and prices Dopplers as one item, so knife
@@ -38,6 +38,7 @@ const FEE = Number(arg("fee") ?? 0.025); // third-party seller fee (Buff 2.5%; a
 const MAX_COST = Number(arg("max-cost") ?? 5000);
 const VERIFY = Number(arg("verify-steam") ?? 0);
 const MIN_DEPTH = Number(arg("min-depth") ?? 0.1); // never buy in the bottom 10% of a wear grade
+const SHOW_T = arg("show-t"); // a collection name ("Fever"): print every float target it was priced at
 const N = 5;
 const BOUNDARIES = WEAR_RANGES.slice(0, -1).map((w) => w.max);
 const EXCLUDED = "Limited Edition Item";
@@ -157,6 +158,13 @@ for (const p of pools.values()) {
     const costCash = N * cash.cash!;
     if (costCash > MAX_COST) continue;
     const c = { pool: p, T, cash, steam, outcomes, evFast, evPatient, costCash };
+    if (SHOW_T && short(p.name) === SHOW_T) {
+      const fn = outcomes.filter((o) => o.wear === "Factory New").length;
+      console.log(
+        `  T ≤ ${T.toFixed(4)}  5× ${cash.skin.name} (${ABBR[cash.wear]}) ≤${cash.cap.toFixed(3)} ${money(cash.cash!)} ea → cost ${money(costCash)}` +
+          `  EV ${money(evFast)}  RTP ${((evFast / costCash) * 100).toFixed(0)}%  FN outcomes ${fn}/${outcomes.length}`,
+      );
+    }
     if (!best || evFast / costCash > best.evFast / best.costCash) best = c;
   }
   if (best) contracts.push(best);
