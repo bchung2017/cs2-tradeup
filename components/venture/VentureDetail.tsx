@@ -4,8 +4,9 @@
 // watch out for.
 import type { Venture } from "@/lib/ventures";
 import { rarityHex } from "@/lib/display";
-import { abbr, ago, money, oneIn, pct, ventureLine, VERDICT } from "@/lib/venture-copy";
+import { abbr, money, oneIn, pct, ventureLine, VERDICT } from "@/lib/venture-copy";
 import { BudgetBar, OutcomeBar } from "./FloatBar";
+import Ago from "./Ago";
 
 const steamUrl = (skin: string, wear: string) => `https://steamcommunity.com/market/listings/730/${encodeURIComponent(`${skin} (${wear})`)}`;
 const BASIS: Record<string, string> = {
@@ -105,7 +106,7 @@ export default function VentureDetail({ v, owned }: { v: Venture; owned?: Set<st
       </section>
 
       <p className="vx-meta">
-        Found {ago(v.firstSeenAt)} · checked {ago(v.verifiedAt)} · {v.sources.join(" · ")}
+        Found <Ago iso={v.firstSeenAt} /> · checked <Ago iso={v.verifiedAt} /> · {v.sources.join(" · ")}
       </p>
     </div>
   );

@@ -249,6 +249,7 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-search { flex: 1 1 220px; min-width: 180px; }
 .vx-count { margin: 12px 0 8px; }
 .vx-empty { color: var(--fg-dim); font-size: 13px; padding: 24px 0; }
+.vx-empty a, .vx-note a { color: var(--green); }
 
 .vx-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .vx-row { background: var(--surface); border: 1px solid var(--surface-line); }
@@ -336,8 +337,8 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 }
 @media (max-width: 720px) {
   .pane--venture { padding: 16px 12px 48px; }
-  .vx-line { grid-template-columns: 24px minmax(0, 1fr) 70px; }
-  .vx-line > .vx-num:nth-of-type(n+2) { display: none; }
+  .vx-line { grid-template-columns: 24px minmax(0, 1fr) 68px 44px; gap: 8px; }
+  .vx-num--pays { display: none; }
   .vx-grid2 { grid-template-columns: 1fr; }
   .vx-red__opts li { grid-template-columns: 24px 1fr 70px; }
   .vx-red__opts li > :nth-child(n+4) { display: none; }

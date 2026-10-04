@@ -212,15 +212,22 @@ if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify(ventures));
 
 function toVenture(c: Contract, pWin: number, rareEv: number, book: { listings: { price: number }[]; total: number } | null, checked: boolean): Venture {
   const x = c.cash;
+  // The cash ask ignores float. When Steam's listings at this float cost far more,
+  // the cap is in collector territory and the float-blind price is fiction: use
+  // what the listings cost (P90 Asiimov FN <=0.012: $217 ask, ~$670 on Steam).
+  const steamEach = checked && book && book.listings.length === N ? book.listings.reduce((a, l) => a + l.price, 0) / N : null;
+  const premium = steamEach != null && steamEach > 1.5 * x.cash!;
+  const each = premium ? steamEach! : x.cash!;
+  const cost = each * N;
   const inputs: VentureInput[] = [{
     skin: x.skin.name, skinId: x.skin.id, collection: colsOf(x.skin)[0]?.name ?? "", rarity: x.skin.rarity.name,
-    wear: x.wear, count: N, floatMin: x.lo, floatMax: x.cap, priceEach: x.cash, basis: "cash-ask", listed: book?.total ?? null,
+    wear: x.wear, count: N, floatMin: x.lo, floatMax: x.cap, priceEach: each, basis: premium ? "steam-listings" : "cash-ask", listed: book?.total ?? null,
   }];
   const outcomes: VentureOutcome[] = c.outcomes
     .map((o) => ({
       name: o.knife.name, skinId: o.knife.id, collection: c.pool.name, rarity: o.knife.rarity.name,
       probability: o.p, float: o.float, wear: o.wear, skinMin: o.knife.min_float, skinMax: o.knife.max_float,
-      value: o.v.fast, checked: true, sold24h: null, win: (o.v.fast ?? 0) > c.costCash,
+      value: o.v.fast, checked: true, sold24h: null, win: (o.v.fast ?? 0) > cost,
       ...(o.v.phases ? { rarePhases: o.v.phases.filter((p) => !p.phase.startsWith("Phase")).map((p) => ({ phase: p.phase, value: p.fast })) } : {}),
     }))
     .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
@@ -245,19 +252,20 @@ function toVenture(c: Contract, pWin: number, rareEv: number, book: { listings: 
     inputs,
     outcomes,
     float: { adjusted: T, sum: T * N, max: tMax * N, firstChange: first },
-    cost: c.costCash,
+    cost,
     value: c.evFast,
     valuePatient: c.evPatient,
-    backPerDollar: c.evFast / c.costCash,
-    pProfit: pWin,
-    pAhead: ventureAhead(c.outcomes.map((o) => ({ p: o.p, v: o.v.fast! })), c.costCash),
+    backPerDollar: c.evFast / cost,
+    pProfit: premium ? c.outcomes.filter((o) => o.v.fast! > cost).reduce((a, o) => a + o.p, 0) : pWin,
+    pAhead: ventureAhead(c.outcomes.map((o) => ({ p: o.p, v: o.v.fast! })), cost),
     best: { name: outcomes[0].name, wear: outcomes[0].wear, value: outcomes[0].value ?? 0, probability: outcomes[0].probability },
     rareShare: rareEv > 0 ? rareEv / c.evFast : null,
-    verdict: short_ ? "short" : !checked ? "model" : c.evFast > c.costCash ? "holds" : "dead",
+    verdict: short_ ? "short" : !checked ? "model" : c.evFast > cost ? "holds" : "dead",
     warnings: [
+      ...(premium ? [`at this float the inputs cost ${Math.round((steamEach! / x.cash!) * 10) / 10}× the float-blind ask (Steam listings), so they're priced at the listings`] : []),
       ...(short_ ? [`Steam has ${book!.listings.length} of 5 ${x.skin.name} under ${x.cap.toFixed(3)}: the float cap is a collector float`] : []),
       ...(rareEv > 0 ? [`rare Doppler phases are ${((rareEv / c.evFast) * 100).toFixed(0)}% of the value at an even phase split; real drop rates are likely lower`] : []),
-      "inputs priced at the third-party lowest ask, which ignores float",
+      ...(premium ? [] : ["inputs priced at the third-party lowest ask, which ignores float"]),
       "knife values at the top buy order on Buff163 / CSFloat; selling on Steam is capped near $1,800",
     ],
     verifiedAt: checked ? new Date().toISOString() : null,

@@ -138,3 +138,15 @@ export const markSeen = (keys: string[]) => {
   write(K_SEEN, [...new Set([...seenKeys(), ...keys])].slice(-5000));
   setBadge(0);
 };
+
+// Wall-clock time for relative labels, null until mounted: the static page is
+// rendered at build time, so "3m ago" computed there would never match.
+export function useNow(tickMs = 60_000): number | null {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), tickMs);
+    return () => clearInterval(t);
+  }, [tickMs]);
+  return now;
+}

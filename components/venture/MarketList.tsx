@@ -6,8 +6,9 @@ import { useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ExpiredFile, Venture, VenturesFile } from "@/lib/ventures";
 import { ago, TIER_SHORT } from "@/lib/venture-copy";
-import { useOwned, useTracked } from "@/lib/venture-store";
+import { useNow, useOwned, useTracked } from "@/lib/venture-store";
 import VentureRow from "./VentureRow";
+import Ago from "./Ago";
 
 const TIERS = ["Consumer Grade", "Industrial Grade", "Mil-Spec Grade", "Restricted", "Classified", "Covert"];
 const NEW_MS = 24 * 3600e3;
@@ -17,14 +18,18 @@ const winnerSales = (v: Venture) => {
   const s = v.outcomes.filter((o) => o.win && o.sold24h != null).map((o) => o.sold24h!);
   return s.length ? Math.min(...s) : -1;
 };
+// Value sorts put contracts that can't be filled or weren't fully checked last:
+// their numbers are the least trustworthy, and unsorted they'd top the list.
+const TRUST: Record<string, number> = { holds: 0, paper: 1, dead: 2, model: 2, unverified: 3, short: 4 };
+const trust = (fn: (a: Venture, b: Venture) => number) => (a: Venture, b: Venture) => TRUST[a.verdict] - TRUST[b.verdict] || fn(a, b);
 const SORTS = {
-  back: { label: "Most back per $1", fn: (a: Venture, b: Venture) => b.backPerDollar - a.backPerDollar },
-  pays: { label: "Most likely to pay", fn: (a: Venture, b: Venture) => b.pProfit - a.pProfit },
-  ahead: { label: "Ahead after 5 pulls", fn: (a: Venture, b: Venture) => (b.pAhead.at(-1)?.p ?? 0) - (a.pAhead.at(-1)?.p ?? 0) },
+  back: { label: "Most back per $1", fn: trust((a: Venture, b: Venture) => b.backPerDollar - a.backPerDollar) },
+  pays: { label: "Most likely to pay", fn: trust((a: Venture, b: Venture) => b.pProfit - a.pProfit) },
+  ahead: { label: "Ahead after 5 pulls", fn: trust((a: Venture, b: Venture) => (b.pAhead.at(-1)?.p ?? 0) - (a.pAhead.at(-1)?.p ?? 0)) },
   cheap: { label: "Entry: lowest first", fn: (a: Venture, b: Venture) => a.cost - b.cost },
   pricey: { label: "Entry: highest first", fn: (a: Venture, b: Venture) => b.cost - a.cost },
-  jackpot: { label: "Biggest jackpot", fn: (a: Venture, b: Venture) => b.best.value - a.best.value },
-  odds: { label: "Best odds at the jackpot", fn: (a: Venture, b: Venture) => b.best.probability - a.best.probability },
+  jackpot: { label: "Biggest jackpot", fn: trust((a: Venture, b: Venture) => b.best.value - a.best.value) },
+  odds: { label: "Best odds at the jackpot", fn: trust((a: Venture, b: Venture) => b.best.probability - a.best.probability) },
   newest: { label: "Newest found", fn: (a: Venture, b: Venture) => Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt) },
   oldest: { label: "Longest alive", fn: (a: Venture, b: Venture) => Date.parse(a.firstSeenAt) - Date.parse(b.firstSeenAt) },
   checked: { label: "Most recently checked", fn: (a: Venture, b: Venture) => Date.parse(b.verifiedAt ?? "0") - Date.parse(a.verifiedAt ?? "0") },
@@ -61,7 +66,9 @@ export default function MarketList({ data, expired }: { data: VenturesFile; expi
   const freshH = Number(get("fresh") || 0);
   const sort = (get("sort", "back") in SORTS ? get("sort", "back") : "back") as SortKey;
 
-  const now = Date.now();
+  // until mounted, judge "new" and "checked within" against the run time, which
+  // the server and the browser agree on
+  const now = useNow() ?? Date.parse(data.generatedAt);
   const rows = useMemo(() => {
     return data.ventures
       .filter((v) => {
@@ -128,7 +135,7 @@ export default function MarketList({ data, expired }: { data: VenturesFile; expi
         </label>
         <label className="vx-check"><input type="checkbox" checked={knifeOnly} onChange={(e) => set("knife", e.target.checked ? "1" : "")} /> knives only</label>
         <label className="vx-check"><input type="checkbox" checked={doppler} onChange={(e) => set("doppler", e.target.checked ? "1" : "")} /> has a Doppler</label>
-        <label className="vx-check" title={owned ? `inventory from ${ago(owned.at)}` : "load your inventory in INVENTORY or My Ventures first"}>
+        <label className="vx-check" title={owned ? `inventory from ${ago(owned.at, now)}` : "load your inventory in INVENTORY or My Ventures first"}>
           <input type="checkbox" checked={mine} disabled={!owned} onChange={(e) => set("mine", e.target.checked ? "1" : "")} /> uses items I own
         </label>
         <label>Sort
@@ -139,7 +146,7 @@ export default function MarketList({ data, expired }: { data: VenturesFile; expi
       </form>
 
       <p className="vx-count hud">
-        {rows.length} of {data.ventures.length} contracts · run {ago(data.generatedAt)}
+        {rows.length} of {data.ventures.length} contracts · run <Ago iso={data.generatedAt} />
         {expired.rows.length > 0 && ` · ${expired.rows.filter((r) => now - Date.parse(r.expiredAt) < NEW_MS * 7).length} gone this week`}
       </p>
 

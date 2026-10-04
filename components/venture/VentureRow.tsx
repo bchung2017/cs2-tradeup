@@ -6,8 +6,9 @@
 import { useState } from "react";
 import type { Venture } from "@/lib/ventures";
 import { rarityHex } from "@/lib/display";
-import { abbr, ago, backShort, money, oneIn, pct, TIER_SHORT, VERDICT } from "@/lib/venture-copy";
+import { abbr, backShort, money, oneIn, pct, TIER_SHORT, VERDICT } from "@/lib/venture-copy";
 import VentureDetail from "./VentureDetail";
+import Ago from "./Ago";
 
 export default function VentureRow({
   v, tracked, onTrack, owned, isNew, open: openInit = false,
@@ -52,9 +53,9 @@ export default function VentureRow({
           </div>
         </div>
 
-        <div className="vx-num"><b>{money(v.cost)}</b><span className="dim">entry</span></div>
-        <div className="vx-num"><b className={v.backPerDollar >= 1 ? "pos" : v.backPerDollar >= 0.85 ? "" : "neg"}>{backShort(v.backPerDollar)}</b><span className="dim">back per $1</span></div>
-        <div className="vx-num"><b>{pct(v.pProfit)}</b><span className="dim">pull pays</span></div>
+        <div className="vx-num vx-num--cost"><b>{money(v.cost)}</b><span className="dim">entry</span></div>
+        <div className="vx-num vx-num--back"><b className={v.backPerDollar >= 1 ? "pos" : v.backPerDollar >= 0.85 ? "" : "neg"}>{backShort(v.backPerDollar)}</b><span className="dim">back per $1</span></div>
+        <div className="vx-num vx-num--pays"><b>{pct(v.pProfit)}</b><span className="dim">pull pays</span></div>
         <div className="vx-jackpot">
           <b>{money(v.best.value)}</b>
           <span className="dim" title={v.best.name}>{oneIn(v.best.probability)} · {v.best.name.replace(/^★ /, "")}</span>
@@ -65,7 +66,7 @@ export default function VentureRow({
         </div>
         <div className="vx-fresh">
           <span className={`vx-chip tone-${verdict.tone}`} title={verdict.note}>{verdict.label}</span>
-          <span className="dim">checked {ago(v.verifiedAt)}</span>
+          <span className="dim">checked <Ago iso={v.verifiedAt} /></span>
         </div>
       </div>
       {open && <VentureDetail v={v} owned={owned} />}

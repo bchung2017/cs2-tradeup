@@ -10,8 +10,9 @@ import Link from "next/link";
 import type { LonglistFile, LonglistRow, VenturesFile } from "@/lib/ventures";
 import { useTradeup } from "@/lib/tradeup-context";
 import { abbr, ago, backShort, money, oneIn, pct } from "@/lib/venture-copy";
-import { loadOwned, markSeen, matchLonglist, useOwned, useTracked } from "@/lib/venture-store";
+import { loadOwned, markSeen, matchLonglist, useNow, useOwned, useTracked } from "@/lib/venture-store";
 import VentureRow from "./VentureRow";
+import Ago from "./Ago";
 
 const DEFAULT_STEAMID = "76561198059693930";
 
@@ -22,6 +23,7 @@ export default function MyVentures({ market }: { market: VenturesFile }) {
   const [longlist, setLonglist] = useState<LonglistFile | null>(null);
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<string | null>(null);
+  const now = useNow();
 
   useEffect(() => {
     fetch("/data/ventures-longlist.json")
@@ -61,7 +63,7 @@ export default function MyVentures({ market }: { market: VenturesFile }) {
     <div className="vx-mine">
       <section className="vx-section">
         <form className="vx-load" onSubmit={(e) => { e.preventDefault(); void load(input || owned?.steamid || DEFAULT_STEAMID); }}>
-          <span>{owned ? `Inventory ${owned.steamid} · ${owned.items.reduce((a, i) => a + i.count, 0)} items · read ${ago(owned.at)}` : "No inventory loaded."}</span>
+          <span>{owned ? `Inventory ${owned.steamid} · ${owned.items.reduce((a, i) => a + i.count, 0)} items · read ${ago(owned.at, now ?? Date.parse(owned.at))}` : "No inventory loaded."}</span>
           <input placeholder="steamid64 or profile URL" value={input} onChange={(e) => setInput(e.target.value)} />
           <button type="submit" className="hud">{owned ? "Reload" : "Load"}</button>
           {status && <span className="tone-warn">{status}</span>}
@@ -117,7 +119,7 @@ export default function MyVentures({ market }: { market: VenturesFile }) {
                 <li key={k} className="vx-row">
                   <div className="vx-line" style={{ gridTemplateColumns: "24px minmax(220px, 1fr) 120px 140px" }}>
                     <button className="vx-star is-on" onClick={() => toggle(k, t.back, t.title)} aria-label="Stop tracking">★</button>
-                    <div className="vx-what"><div className="vx-inputs">{t.title}</div><div className="vx-cols dim">starred {ago(t.at)}</div></div>
+                    <div className="vx-what"><div className="vx-inputs">{t.title}</div><div className="vx-cols dim">starred <Ago iso={t.at} /></div></div>
                     <div className="vx-num"><b>{now == null ? "gone" : backShort(now)}</b><span className="dim">{now == null ? "dropped out of the last run" : "back per $1 now"}</span></div>
                     <div className="vx-num">
                       <b className={move == null ? "" : move >= 0 ? "pos" : "neg"}>{move == null ? `${backShort(t.back)} then` : `${move >= 0 ? "+" : "−"}${Math.abs(Math.round(move * 100))}¢`}</b>
