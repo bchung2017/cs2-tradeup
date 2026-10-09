@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Rarity, Skin } from "@/types/cs2";
 import type { InventoryItem } from "@/lib/steam";
 
@@ -147,9 +147,38 @@ function skinFromInventory(item: InventoryItem): Skin {
   };
 }
 
+// The last profile loaded in this browser: its steamid64 and what was typed to
+// load it (a profile URL, vanity name or steamid).
+const K_PROFILE = "profile:last";
+export function readProfile(): { steamid?: string; input?: string } {
+  try {
+    return JSON.parse(localStorage.getItem(K_PROFILE) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+export function saveProfile(p: { steamid?: string; input?: string }) {
+  try {
+    localStorage.setItem(K_PROFILE, JSON.stringify({ ...readProfile(), ...p }));
+  } catch {
+    // private mode / quota: the profile lasts this page view only
+  }
+}
+
 export function TradeupProvider({ children }: { children: React.ReactNode }) {
   const [slots, setSlotsRaw] = useState<Slot[]>(() => makeSlots(STANDARD_COUNT));
-  const [steamid, setSteamid] = useState<string | null>(null);
+  const [steamid, setSteamidRaw] = useState<string | null>(null);
+  // The loaded profile outlives a reload or a direct visit to INVENTORY: it's
+  // kept in this browser and read back on mount (after hydration, so the
+  // server render and the first client render agree).
+  useEffect(() => {
+    const saved = readProfile().steamid;
+    if (saved) setSteamidRaw((cur) => cur ?? saved);
+  }, []);
+  const setSteamid = useCallback((id: string | null) => {
+    setSteamidRaw(id);
+    if (id) saveProfile({ steamid: id });
+  }, []);
   const slotsRef = useRef(slots);
   slotsRef.current = slots;
 
