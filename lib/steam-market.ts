@@ -109,13 +109,13 @@ export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } 
   const stats = { calls: 0, rateLimited: 0, throttled: false };
 
   // GET with spacing and 429 backoff. null = unreachable or throttled.
-  function get(url: string, label: string): string | null {
+  function get(url: string, label: string, headers: string[] = []): string | null {
     if (stats.throttled) return null;
     for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {
       if (stats.calls++ > 0) sleep(gapMs);
       let out: string;
       try {
-        out = execFileSync("curl", ["-sS", "-L", "--max-time", "30", "-w", "\n%{http_code}", url], { encoding: "utf8", maxBuffer: 64 << 20 });
+        out = execFileSync("curl", ["-sS", "-L", "--max-time", "30", ...headers.flatMap((h) => ["-H", h]), "-w", "\n%{http_code}", url], { encoding: "utf8", maxBuffer: 64 << 20 });
       } catch {
         return null;
       }
@@ -183,14 +183,23 @@ export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } 
     return cached(`floats|${name}|${lo.toFixed(4)}|${hi.toFixed(4)}|${n}`, () => {
       const listings: FloatListing[] = [];
       let total = 0;
+      const group = groupId(name);
       for (let start = 0; listings.length < n; start += PAGE) {
-        const qs = new URLSearchParams({
-          assetproperty: wearFilter(lo, hi),
-          category_Quality: "normal",
-          category_Exterior: `WearCategory${w}`,
-          start: String(start),
-        });
-        const page = getPage(`https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}?${qs}`, `${name} ≤${hi.toFixed(3)}`, (p) => p.search)?.search;
+        // The page's own data call first: it waits for Steam's search, where the
+        // server-rendered page drops it about half the time when the search runs
+        // slow (Five-SeveN | Hybrid FT: 7-8 s). The rendered page is the fallback.
+        const page =
+          (group && (searchAction(group, w, lo, hi, start, `${name} ≤${hi.toFixed(3)}`) ?? searchAction(group, w, lo, hi, start, `${name} ≤${hi.toFixed(3)} (retry)`))) ||
+          getPage(
+            `https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}?${new URLSearchParams({
+              assetproperty: wearFilter(lo, hi),
+              category_Quality: "normal",
+              category_Exterior: `WearCategory${w}`,
+              start: String(start),
+            })}`,
+            `${name} ≤${hi.toFixed(3)}`,
+            (p) => p.search,
+          )?.search;
         if (!page) return null;
         total = page.total_count;
         for (const l of page.listings) {
@@ -204,6 +213,47 @@ export function steamMarket(opts: { gapMs?: number; log?: (s: string) => void } 
       listings.sort((a, b) => a.price - b.price);
       return { listings: listings.slice(0, n), total };
     });
+  }
+
+  // The item group a market_hash_name belongs to ("G18032090093004"): the
+  // listings URL redirects to it. Groups don't change, so it's cached for good.
+  function groupId(name: string): string | null {
+    const hit = cache[`group|${name}`];
+    if (hit) return hit.v as string;
+    if (stats.throttled) return null;
+    if (stats.calls++ > 0) sleep(gapMs);
+    let to = "";
+    try {
+      to = execFileSync("curl", ["-sS", "-o", "/dev/null", "--max-time", "30", "-w", "%{redirect_url}", `https://steamcommunity.com/market/listings/730/${encodeURIComponent(name)}`], { encoding: "utf8" });
+    } catch {
+      return null;
+    }
+    const g = /\/730\/(G[0-9A-F]+)/.exec(to)?.[1] ?? null;
+    if (g) {
+      cache[`group|${name}`] = { at: Date.now(), v: g };
+      mkdirSync("node_modules/.cache", { recursive: true });
+      writeFileSync(CACHE, JSON.stringify(cache));
+    }
+    return g;
+  }
+
+  // GET /market/actions?q=QueryListingsForItem: the JSON call the market page
+  // makes for its listing search (header x-valve-request-type: queryAction).
+  function searchAction(group: string, w: number, lo: number, hi: number, start: number, label: string): SearchPage | null {
+    const q = {
+      appid: 730, strItemName: group,
+      filters: { Quality: ["normal"], Exterior: [`WearCategory${w}`] }, accessoryFilters: {},
+      propertyFilters: { "2": { property_id: 2, float_min: lo, float_max: hi } },
+      start,
+    };
+    const body = get(`https://steamcommunity.com/market/actions?q=QueryListingsForItem&qp=${encodeURIComponent(JSON.stringify([q]))}`, label, ["x-valve-request-type: queryAction"]);
+    if (body == null) return null;
+    try {
+      const d = (JSON.parse(body) as { data?: SearchPage }).data;
+      return d && Array.isArray(d.listings) && typeof d.total_count === "number" ? d : null;
+    } catch {
+      return null;
+    }
   }
 
   // Same fields as priceOverview, read from the listings page: the cheapest

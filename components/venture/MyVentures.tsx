@@ -14,10 +14,20 @@ import { loadOwned, markSeen, matchLonglist, useNow, useTracked } from "@/lib/ve
 import { useVenturePlans } from "@/lib/venture-fit";
 import VentureRow from "./VentureRow";
 import Ago from "./Ago";
+import SkinStack, { ImagesProvider, type StackItem } from "./SkinStack";
+
+// a longlist contract as pictures: your red, then the filler (one picture if they're the same skin)
+function redStack(r: LonglistRow): StackItem[] {
+  if (r.filler === r.owned) return [{ key: r.owned, name: r.owned, count: r.ownedCount + r.fillerCount, rarity: "Covert" }];
+  return [
+    { key: r.owned, name: r.owned, count: r.ownedCount, rarity: "Covert", note: `yours, ${r.ownedWear}` },
+    { key: r.filler, name: r.filler, count: r.fillerCount, rarity: "Covert", note: `buy, ${r.fillerWear}` },
+  ];
+}
 
 const DEFAULT_STEAMID = "76561198059693930";
 
-export default function MyVentures({ market }: { market: VenturesFile }) {
+export default function MyVentures({ market, images }: { market: VenturesFile; images: Record<string, string> }) {
   const { steamid: railSteamid } = useTradeup();
   const { plans, owned } = useVenturePlans(market.ventures);
   const { tracked, toggle } = useTracked();
@@ -61,6 +71,7 @@ export default function MyVentures({ market }: { market: VenturesFile }) {
   const trackedKeys = Object.keys(tracked);
 
   return (
+    <ImagesProvider value={images}>
     <div className="vx-mine">
       <section className="vx-section">
         <form className="vx-load" onSubmit={(e) => { e.preventDefault(); void load(input || owned?.steamid || DEFAULT_STEAMID); }}>
@@ -131,6 +142,7 @@ export default function MyVentures({ market }: { market: VenturesFile }) {
         )}
       </section>
     </div>
+    </ImagesProvider>
   );
 }
 
@@ -156,7 +168,10 @@ function RedCard({
           return (
             <li key={r.key}>
               <button className={`vx-star${tracked[r.key] ? " is-on" : ""}`} onClick={() => toggle(r.key, r.backPerDollar, title)} aria-label="Track">{tracked[r.key] ? "★" : "☆"}</button>
-              <span>+ {r.fillerCount}× {r.filler} <span className="dim">({r.fillerWear}) @ {money(r.fillerAsk)} · {r.pools.join(" + ")} · {r.knifeItems} knives</span></span>
+              <span>
+                <SkinStack items={redStack(r)} size={38} />
+                + {r.fillerCount}× {r.filler} <span className="dim">({r.fillerWear}) @ {money(r.fillerAsk)} · {r.pools.join(" + ")} · {r.knifeItems} knives</span>
+              </span>
               <span className="vx-num"><b>{money(r.cost)}</b></span>
               <span className="vx-num"><b className={r.backPerDollar >= 0.9 ? "" : "neg"}>{backShort(r.backPerDollar)}</b></span>
               <span className="vx-num"><b>{pct(r.pProfit)}</b></span>

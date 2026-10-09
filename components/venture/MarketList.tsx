@@ -10,6 +10,7 @@ import { useNow, useTracked } from "@/lib/venture-store";
 import { useVenturePlans } from "@/lib/venture-fit";
 import VentureRow from "./VentureRow";
 import Ago from "./Ago";
+import { ImagesProvider } from "./SkinStack";
 
 const TIERS = ["Consumer Grade", "Industrial Grade", "Mil-Spec Grade", "Restricted", "Classified", "Covert"];
 const NEW_MS = 24 * 3600e3;
@@ -38,7 +39,7 @@ const SORTS = {
   liquid: { label: "Winners sell fastest", fn: (a: Venture, b: Venture) => winnerSales(b) - winnerSales(a) },
 } as const;
 
-export default function MarketList({ data, expired }: { data: VenturesFile; expired: ExpiredFile }) {
+export default function MarketList({ data, expired, images }: { data: VenturesFile; expired: ExpiredFile; images: Record<string, string> }) {
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -94,6 +95,7 @@ export default function MarketList({ data, expired }: { data: VenturesFile; expi
   }
 
   return (
+    <ImagesProvider value={images}>
     <div className="vx-market">
       <form className="vx-filters" onSubmit={(e) => e.preventDefault()}>
         <input className="vx-search" placeholder="skin, collection or outcome…" defaultValue={get("q")} onChange={(e) => set("q", e.target.value)} aria-label="Search" />
@@ -164,5 +166,6 @@ export default function MarketList({ data, expired }: { data: VenturesFile; expi
       </ul>
       {rows.length === 0 && <p className="vx-empty">Nothing matches. Loosen a filter.</p>}
     </div>
+    </ImagesProvider>
   );
 }

@@ -9,6 +9,7 @@ import { BudgetBar, OutcomeBar } from "./FloatBar";
 import Ago from "./Ago";
 import Handoff from "./Handoff";
 import type { Plan } from "@/lib/venture-fit";
+import { useImages } from "./SkinStack";
 
 const steamUrl = (skin: string, wear: string) => `https://steamcommunity.com/market/listings/730/${encodeURIComponent(`${skin} (${wear})`)}`;
 const BASIS: Record<string, string> = {
@@ -18,6 +19,7 @@ const BASIS: Record<string, string> = {
 };
 
 export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | null }) {
+  const images = useImages();
   return (
     <div className="vx-detail">
       <p className="vx-igl"><span className="vx-igl__tag">IGL</span> {ventureLine(v)}</p>
@@ -34,6 +36,10 @@ export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | n
                 <tr key={`${i.skinId}|${i.wear}`}>
                   <td>
                     <span className="vx-rar" style={{ background: rarityHex(i.rarity) }} />
+                    {images[i.skinId] && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img className="vx-thumb" src={images[i.skinId]} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                    )}
                     {i.count}× <a href={steamUrl(i.skin, i.wear)} target="_blank" rel="noreferrer">{i.skin}</a>
                     {mine.length > 0 && (
                       <span className="vx-own" title={mine.map((o) => `${o.name} (${abbr(o.wear)}) ${o.float.toFixed(4)}`).join("\n")}>

@@ -351,3 +351,15 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 @media (prefers-reduced-motion: reduce) {
   .vx-toast { animation: none; }
 }
+
+/* skin pictures: one per distinct skin, with its count */
+.vx-stack { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; margin: 2px 0 4px; }
+.vx-skin { position: relative; margin: 0; background: var(--surface-2); border: 1px solid var(--surface-line); border-bottom-width: 2px; }
+.vx-skin img { display: block; width: 100%; object-fit: contain; overflow: hidden; font-size: 0; }
+.vx-skin__none { display: flex; align-items: center; justify-content: center; color: var(--fg-faint); font-size: 12px; }
+.vx-skin__count {
+  position: absolute; right: -4px; bottom: -6px; font-size: 10px; font-weight: 700; line-height: 1;
+  color: var(--void); background: var(--fg); padding: 2px 3px; border-radius: 2px; font-variant-numeric: tabular-nums;
+}
+.vx-stack__lbl { font-size: 10px; letter-spacing: 0.06em; align-self: center; margin-left: 2px; }
+.vx-table .vx-thumb { width: 36px; height: 27px; object-fit: contain; vertical-align: middle; margin-right: 6px; background: var(--surface-2); }

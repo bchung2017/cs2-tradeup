@@ -10,6 +10,7 @@ import { abbr, backShort, money, oneIn, pct, TIER_SHORT, VERDICT } from "@/lib/v
 import VentureDetail from "./VentureDetail";
 import Ago from "./Ago";
 import { isReady, type Plan } from "@/lib/venture-fit";
+import SkinStack, { stackInputs } from "./SkinStack";
 
 export default function VentureRow({
   v, tracked, onTrack, plan, isNew, open: openInit = false,
@@ -42,6 +43,7 @@ export default function VentureRow({
         </div>
 
         <div className="vx-what">
+          <SkinStack items={stackInputs(v.inputs)} />
           <div className="vx-inputs">
             {v.inputs.map((i) => (
               <span key={`${i.skinId}|${i.wear}`}>{i.count}× {i.skin} <span className="dim">{abbr(i.wear)} ≤{i.floatMax.toFixed(2)}</span></span>
