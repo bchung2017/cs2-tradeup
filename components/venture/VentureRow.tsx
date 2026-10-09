@@ -9,6 +9,7 @@ import { rarityHex } from "@/lib/display";
 import { abbr, backShort, money, oneIn, pct, TIER_SHORT, VERDICT } from "@/lib/venture-copy";
 import VentureDetail from "./VentureDetail";
 import Ago from "./Ago";
+import SkinStack, { stackInputs } from "./SkinStack";
 
 export default function VentureRow({
   v, tracked, onTrack, owned, isNew, open: openInit = false,
@@ -41,6 +42,7 @@ export default function VentureRow({
         </div>
 
         <div className="vx-what">
+          <SkinStack items={stackInputs(v.inputs)} />
           <div className="vx-inputs">
             {v.inputs.map((i) => (
               <span key={`${i.skinId}|${i.wear}`}>{i.count}× {i.skin} <span className="dim">{abbr(i.wear)} ≤{i.floatMax.toFixed(2)}</span></span>

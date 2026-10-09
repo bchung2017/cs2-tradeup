@@ -7,6 +7,7 @@ import { rarityHex } from "@/lib/display";
 import { abbr, money, oneIn, pct, ventureLine, VERDICT } from "@/lib/venture-copy";
 import { BudgetBar, OutcomeBar } from "./FloatBar";
 import Ago from "./Ago";
+import { useImages } from "./SkinStack";
 
 const steamUrl = (skin: string, wear: string) => `https://steamcommunity.com/market/listings/730/${encodeURIComponent(`${skin} (${wear})`)}`;
 const BASIS: Record<string, string> = {
@@ -16,6 +17,7 @@ const BASIS: Record<string, string> = {
 };
 
 export default function VentureDetail({ v, owned }: { v: Venture; owned?: Set<string> }) {
+  const images = useImages();
   return (
     <div className="vx-detail">
       <p className="vx-igl"><span className="vx-igl__tag">IGL</span> {ventureLine(v)}</p>
@@ -31,6 +33,10 @@ export default function VentureDetail({ v, owned }: { v: Venture; owned?: Set<st
                 <tr key={`${i.skinId}|${i.wear}`}>
                   <td>
                     <span className="vx-rar" style={{ background: rarityHex(i.rarity) }} />
+                    {images[i.skinId] && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img className="vx-thumb" src={images[i.skinId]} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                    )}
                     {i.count}× <a href={steamUrl(i.skin, i.wear)} target="_blank" rel="noreferrer">{i.skin}</a>
                     {have && <span className="vx-own">you own this</span>}
                   </td>
