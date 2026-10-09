@@ -91,7 +91,7 @@ export default function MarketList({ data, expired, images }: { data: VenturesFi
   }, [data, q, tier, verdict, minCost, maxCost, minPays, venue, knifeOnly, doppler, mine, freshH, sort, plans, now]);
 
   if (!data.ventures.length) {
-    return <p className="vx-empty">No run yet. The weekly sync writes public/data/ventures.json; run <code>npx tsx scripts/igl9000-ventures.ts</code> to make one now.</p>;
+    return <p className="vx-empty">No run yet. Run <code>npx tsx scripts/igl9000-ventures.ts</code> or wait for the weekly sync.</p>;
   }
 
   return (

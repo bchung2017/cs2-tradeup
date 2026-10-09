@@ -69,7 +69,7 @@ export default function VentureToast() {
       <p style={{ margin: "4px 0 6px" }}>
         Your <b>{toast.item}</b> can roll a <b>{top.name}</b>, {money(top.value)}. {oneIn(top.probability)} pulls.
       </p>
-      <Link href="/venture/mine" onClick={() => setToast(null)}>See what it takes →</Link>
+      <Link href="/venture/mine" onClick={() => setToast(null)}>What it takes →</Link>
     </div>
   );
 }

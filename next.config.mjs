@@ -19,5 +19,9 @@ const nextConfig = {
       },
     ];
   },
+  // Venture is the front door; the trade-up console lives at /console.
+  async redirects() {
+    return [{ source: "/", destination: "/venture/market", permanent: false }];
+  },
 };
 export default nextConfig;

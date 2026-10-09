@@ -4,8 +4,11 @@
 // and off the cold-compile path. Do NOT add "use client" here or hooks to this
 // file; push interactivity into a child island instead. TradeupProvider now
 // lives in the root layout (survives navigation), so it is NOT wrapped here.
+import type { Metadata } from "next";
 import TradeUpConsole from "@/components/TradeUpConsole";
 import InventoryPanel from "@/components/InventoryPanel";
+
+export const metadata: Metadata = { title: "CS2 Journeyman · Console" };
 
 export default function Page() {
   return (

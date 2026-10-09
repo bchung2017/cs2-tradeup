@@ -13,9 +13,9 @@ import { useImages } from "./SkinStack";
 
 const steamUrl = (skin: string, wear: string) => `https://steamcommunity.com/market/listings/730/${encodeURIComponent(`${skin} (${wear})`)}`;
 const BASIS: Record<string, string> = {
-  "steam-listings": "cheapest Steam listings under the cap",
-  "steam-feed": "Steam sale median (live check didn't load)",
-  "cash-ask": "lowest third-party ask, float ignored",
+  "steam-listings": "cheapest Steam listings under cap",
+  "steam-feed": "Steam median (live check failed)",
+  "cash-ask": "lowest third-party ask, any float",
 };
 
 export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | null }) {
@@ -38,12 +38,12 @@ export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | n
                     <span className="vx-rar" style={{ background: rarityHex(i.rarity) }} />
                     {images[i.skinId] && (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img className="vx-thumb" src={images[i.skinId]} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                      <img className={`vx-thumb${mine.length ? " owned-glow" : ""}`} style={{ ["--glow" as string]: rarityHex(i.rarity) }} src={images[i.skinId]} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
                     )}
                     {i.count}× <a href={steamUrl(i.skin, i.wear)} target="_blank" rel="noreferrer">{i.skin}</a>
                     {mine.length > 0 && (
-                      <span className="vx-own" title={mine.map((o) => `${o.name} (${abbr(o.wear)}) ${o.float.toFixed(4)}`).join("\n")}>
-                        {mine.length} yours{mine.some((o) => o.skin.id !== i.skinId) ? " · stand-in" : ""}
+                      <span className="owned-tag" style={{ ["--glow" as string]: rarityHex(i.rarity) }} title={mine.map((o) => `${o.name} (${abbr(o.wear)}) ${o.float.toFixed(4)}`).join("\n")}>
+                        {mine.length} yours · {mine.map((o) => `${o.skin.id !== i.skinId ? `${o.name} ` : ""}${o.float.toFixed(4)}`).join(", ")}
                       </span>
                     )}
                   </td>
@@ -64,7 +64,7 @@ export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | n
         <h4 className="hud">Float budget</h4>
         <BudgetBar sum={v.float.sum} max={v.float.max} size={v.size} />
         <p className="vx-note">
-          Adjusted float {v.float.adjusted.toFixed(4)}. Each input counts as (float − its min) / (its max − its min); keep the sum under {v.float.max.toFixed(3)}
+          Adjusted float {v.float.adjusted.toFixed(4)}. Each input counts (float − min) / (max − min); keep the sum under {v.float.max.toFixed(3)}
           {v.float.firstChange ? ` or ${v.float.firstChange} drops a wear grade first.` : "."}
         </p>
       </section>
@@ -94,7 +94,7 @@ export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | n
             ))}
           </tbody>
         </table>
-        <p className="vx-note">Green rows sell for more than the contract costs. * = feed price, not checked live (worth under half the cost).</p>
+        <p className="vx-note">Green rows sell for more than the cost. * = feed price, not checked live (under half the cost).</p>
       </section>
 
       <section className="vx-grid2">
@@ -106,7 +106,7 @@ export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | n
             ))}
           </div>
           {v.valuePatient != null && (
-            <p className="vx-note">Selling at the lowest ask instead of the top buy order: {Math.round((v.valuePatient / v.cost) * 100)}¢ back per $1.</p>
+            <p className="vx-note">Selling at lowest ask, not top buy order: {Math.round((v.valuePatient / v.cost) * 100)}¢ back per $1.</p>
           )}
         </div>
         <div>

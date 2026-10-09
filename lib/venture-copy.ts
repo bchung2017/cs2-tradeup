@@ -33,12 +33,12 @@ export function ago(iso: string | null, now = Date.now()): string {
 }
 
 export const VERDICT: Record<Verdict, { label: string; tone: "good" | "warn" | "bad" | "dim"; note: string }> = {
-  holds: { label: "PAYS BACK", tone: "good", note: "pays back more than it costs at live sale prices" },
-  paper: { label: "ON PAPER", tone: "warn", note: "only pays back through outcomes nobody bought in the last 24h" },
-  dead: { label: "COSTS MORE", tone: "bad", note: "costs more than it pays back at live prices" },
-  unverified: { label: "UNCHECKED", tone: "warn", note: "a live price didn't load on the last check" },
-  short: { label: "CAN'T FILL", tone: "bad", note: "Steam doesn't list enough inputs under the float cap" },
-  model: { label: "FEED ONLY", tone: "dim", note: "priced from market feeds, not checked against live listings" },
+  holds: { label: "PAYS BACK", tone: "good", note: "pays back more than it costs at live prices" },
+  paper: { label: "ON PAPER", tone: "warn", note: "pays back only via outcomes unsold in 24h" },
+  dead: { label: "COSTS MORE", tone: "bad", note: "costs more than it returns at live prices" },
+  unverified: { label: "UNCHECKED", tone: "warn", note: "a live price didn't load last check" },
+  short: { label: "CAN'T FILL", tone: "bad", note: "not enough Steam listings under the float cap" },
+  model: { label: "FEED ONLY", tone: "dim", note: "feed prices, not checked against live listings" },
 };
 
 export const TIER_SHORT: Record<string, string> = {
@@ -58,9 +58,9 @@ export function ventureTitle(v: Venture): string {
 // The one line IGL-9000 says about a contract.
 export function ventureLine(v: Venture): string {
   const hit = `${oneIn(v.best.probability)} pulls is ${v.best.name} (${abbr(v.best.wear)}), ${money(v.best.value)}`;
-  const vs = v.backPerDollar >= 1 ? "more than just selling the inputs back" : `${backShort(1 - v.backPerDollar)} per $1 less than never buying in`;
+  const vs = v.backPerDollar >= 1 ? "more than selling the inputs back" : `${backShort(1 - v.backPerDollar)} per $1 below not buying in`;
   return `${hit}. Over many pulls it's ${vs}.`;
 }
 
 export const STANDING_LINE =
-  "Sorted by how much comes back, not by what pays: at live sale prices almost nothing here returns more than it costs. Every row is a bet with a known price.";
+  "Sorted by how much comes back. At live prices almost nothing here returns more than it costs: every row is a bet with a known price.";

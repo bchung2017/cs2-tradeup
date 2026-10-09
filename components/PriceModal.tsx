@@ -273,8 +273,7 @@ export default function PriceModal({
         </div>
 
         <div style={{ marginTop: 14, fontSize: 11, color: "var(--cream-dim)", opacity: 0.7, lineHeight: 1.4 }}>
-          Prices shown are the last synced values; icons open the live listing for this
-          exact wear in a new tab.
+          Last synced prices; icons open the live listing for this wear.
         </div>
       </div>
     </div>

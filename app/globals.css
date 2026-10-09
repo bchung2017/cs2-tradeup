@@ -44,7 +44,7 @@
 
   /* persistent top nav rail height — shared by the rail and any full-height
      surface (e.g. the console's sticky inventory column) so they don't overlap */
-  --rail-h: 34px;
+  --rail-h: 60px;
 
   /* back-compat aliases (old names -> accessible palette) */
   --ember: var(--green);            /* accent stays green */
@@ -234,10 +234,6 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 
 .vx-head { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; padding-bottom: 12px; border-bottom: 1px solid var(--surface-line); }
 .vx-title { margin: 4px 0 0; font-size: 28px; font-weight: 700; color: var(--green); letter-spacing: -0.01em; }
-.vx-tabs { display: flex; gap: 4px; }
-.vx-tab { text-decoration: none; padding: 8px 12px; border: 1px solid var(--surface-line); border-bottom: none; color: var(--fg-dim); background: var(--surface); display: inline-flex; gap: 8px; align-items: center; }
-.vx-tab.is-active { color: var(--green); border-color: var(--green-dim); background: var(--surface-2); }
-.vx-badge { background: var(--amber); color: var(--void); font-weight: 700; font-size: 10px; letter-spacing: 0; padding: 0 5px; border-radius: 8px; }
 .vx-standing { margin: 10px 0 16px; font-size: 12px; color: var(--fg-dim); max-width: 92ch; line-height: 1.5; }
 
 .vx-filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; padding: 12px; background: var(--surface); border: 1px solid var(--surface-line); }
@@ -280,7 +276,6 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .tone-bad { color: var(--loss); }
 .tone-dim { color: var(--fg-dim); }
 .vx-new { color: var(--void); background: var(--green); font-weight: 700; font-size: 9px; padding: 0 4px; letter-spacing: 0.1em; }
-.vx-own { color: var(--green); font-size: 10px; border: 1px solid var(--green-dim); padding: 0 4px; margin-left: 6px; }
 .vx-ready { color: var(--green); margin-left: 8px; font-size: 12px; text-shadow: 0 0 6px var(--green); cursor: help; }
 .vx-handoff { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .vx-handoff button { border: 1px solid var(--surface-line); background: var(--surface-2); color: var(--fg); padding: 6px 10px; cursor: pointer; }
@@ -333,7 +328,6 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-toast a { color: var(--green); }
 .vx-toast__x { position: absolute; top: 4px; right: 6px; background: none; border: none; color: var(--fg-faint); cursor: pointer; font-size: 14px; }
 @keyframes vx-in { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
-.rail-badge { margin-left: 5px; background: var(--amber); color: var(--void); font-weight: 700; font-size: 9px; letter-spacing: 0; padding: 0 4px; border-radius: 7px; }
 
 @media (max-width: 1100px) {
   .vx-line { grid-template-columns: 24px minmax(0, 1fr) 84px 84px 72px; }
@@ -362,8 +356,6 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
   color: var(--void); background: var(--fg); padding: 2px 3px; border-radius: 2px; font-variant-numeric: tabular-nums;
 }
 .vx-table .vx-thumb { width: 36px; height: 27px; object-fit: contain; vertical-align: middle; margin-right: 6px; background: var(--surface-2); }
-.vx-skin.is-mine { border-color: var(--green); box-shadow: 0 0 0 1px var(--green-dim); }
-.vx-skin.is-mine .vx-skin__count { background: var(--green); }
 .vx-red__head { align-items: center; }
 .vx-red__mine { display: inline-flex; align-items: center; gap: 12px; }
 .vx-prize { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 10px; }
@@ -374,3 +366,78 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-prize__txt b { font-size: 15px; font-variant-numeric: tabular-nums; color: #e4ae39; }
 .vx-prize__lbl { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #e4ae39; }
 .vx-prize__name { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── top nav rail ───────────────────────────────────────────────────────── */
+.rail {
+  position: sticky; top: 0; z-index: 30; height: var(--rail-h);
+  display: flex; align-items: center; gap: 28px; padding: 0 20px;
+  background: linear-gradient(180deg, #0f1f0f 0%, var(--surface) 100%);
+  border-bottom: 2px solid var(--green-dim);
+  box-shadow: 0 2px 18px rgba(51, 255, 51, 0.14);
+}
+.rail-brand { font-size: 18px; font-weight: 700; color: var(--fg); text-decoration: none; letter-spacing: 0.02em; white-space: nowrap; }
+.rail-brand__prompt { color: var(--green); text-shadow: 0 0 8px var(--green); }
+.rail-links { display: flex; align-items: stretch; height: 100%; gap: 6px; }
+.rail-link {
+  display: inline-flex; align-items: center; gap: 8px; height: 100%; padding: 0 16px;
+  font: 700 14px/1 var(--mono); letter-spacing: 0.16em; color: var(--fg-dim); text-decoration: none;
+  background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.rail-link:hover { color: var(--fg); background: rgba(51, 255, 51, 0.06); }
+.rail-link.is-active { color: var(--green); border-bottom-color: var(--green); text-shadow: 0 0 10px rgba(51, 255, 51, 0.55); }
+.rail-profile { margin-left: auto; }
+.rail-profile img { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--green-dim); object-fit: cover; }
+.rail-caret { font-size: 11px; transition: transform 120ms; }
+.rail-badge { background: var(--amber); color: var(--void); font-weight: 700; font-size: 10px; letter-spacing: 0; padding: 1px 6px; border-radius: 8px; text-shadow: none; margin-left: 6px; }
+
+.rail-menu { position: relative; height: 100%; }
+.rail-drop {
+  position: absolute; top: 100%; left: 0; min-width: 260px; display: none; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--green-dim); border-top: 2px solid var(--green);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.7), 0 0 14px rgba(51, 255, 51, 0.12);
+}
+.rail-menu.is-open .rail-drop { display: flex; }
+.rail-menu.is-open .rail-caret { transform: rotate(180deg); }
+@media (hover: hover) {
+  .rail-menu:hover .rail-drop { display: flex; }
+  .rail-menu:hover .rail-caret { transform: rotate(180deg); }
+}
+.rail-drop a { display: flex; flex-direction: column; gap: 3px; padding: 12px 16px; text-decoration: none; color: var(--fg); font-size: 14px; font-weight: 700; border-left: 3px solid transparent; }
+.rail-drop a small { font-size: 11px; font-weight: 400; color: var(--fg-faint); }
+.rail-drop a:hover { background: var(--surface-2); border-left-color: var(--green-dim); }
+.rail-drop a.is-active { color: var(--green); border-left-color: var(--green); }
+
+@media (max-width: 720px) {
+  :root { --rail-h: 52px; }
+  .rail { gap: 10px; padding: 0 10px; }
+  .rail-brand { font-size: 14px; }
+  .rail-links { gap: 0; }
+  .rail-link { padding: 0 8px; font-size: 12px; letter-spacing: 0.08em; }
+  .rail-profile img { display: none; }
+  .rail-drop { position: fixed; top: var(--rail-h); left: 0; right: 0; min-width: 0; }
+}
+@media (max-width: 420px) {
+  .rail-brand { display: none; }
+}
+
+/* ── owned: a skin that comes from your inventory glows in its rarity color
+   (set --glow inline) and carries a YOURS tag ───────────────────────────── */
+.owned-glow { border-color: var(--glow) !important; animation: owned-pulse 2.4s ease-in-out infinite; }
+@keyframes owned-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--glow), 0 0 10px 2px color-mix(in srgb, var(--glow) 55%, transparent); }
+  50% { box-shadow: 0 0 0 1px var(--glow), 0 0 18px 5px color-mix(in srgb, var(--glow) 80%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .owned-glow { animation: none; box-shadow: 0 0 0 1px var(--glow), 0 0 14px 3px color-mix(in srgb, var(--glow) 65%, transparent); }
+}
+.owned-tag {
+  display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  font: 700 11px/1.3 var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--void); background: var(--glow, var(--green)); padding: 2px 7px;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--glow, var(--green)) 70%, transparent);
+}
+.vx-skin .owned-tag { position: absolute; top: -10px; left: 50%; transform: translateX(-50%); font-size: 10px; padding: 1px 5px; z-index: 1; }
+.vx-stack:has(.owned-tag) { padding-top: 10px; }
+.vx-table td .owned-tag { margin-left: 8px; }
+.vx-table .vx-thumb.owned-glow { border: 1px solid var(--glow); }

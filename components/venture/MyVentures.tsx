@@ -12,6 +12,7 @@ import { useTradeup } from "@/lib/tradeup-context";
 import { abbr, ago, backShort, money, pct } from "@/lib/venture-copy";
 import { loadOwned, markSeen, matchLonglist, useNow, useTracked } from "@/lib/venture-store";
 import { useVenturePlans } from "@/lib/venture-fit";
+import { rarityHex } from "@/lib/display";
 import VentureRow from "./VentureRow";
 import Ago from "./Ago";
 import SkinStack, { GrandPrize, ImagesProvider, type StackItem } from "./SkinStack";
@@ -54,7 +55,7 @@ export default function MyVentures({ market, images }: { market: VenturesFile; i
     if (!steamid) return;
     setStatus("loading inventory…");
     const o = await loadOwned(steamid);
-    setStatus(o ? null : "No cached inventory for that profile yet. Load it once in INVENTORY, then come back.");
+    setStatus(o ? null : "No cached inventory for that profile. Load it in INVENTORY first.");
   }
 
   const matches = useMemo(() => matchLonglist(owned, longlist?.rows ?? []), [owned, longlist]);
@@ -85,7 +86,7 @@ export default function MyVentures({ market, images }: { market: VenturesFile; i
       <section className="vx-section">
         <h3>Your reds → knives</h3>
         {!owned ? (
-          <p className="vx-empty">Load an inventory to see which knife contracts your Coverts can start.</p>
+          <p className="vx-empty">Load an inventory to see which knife contracts your Coverts start.</p>
         ) : matches.size === 0 ? (
           <p className="vx-empty">No Covert in this inventory can start a knife contract{longlist?.rows.length ? "" : " (no longlist yet: run the ventures sync)"}.</p>
         ) : (
@@ -96,7 +97,7 @@ export default function MyVentures({ market, images }: { market: VenturesFile; i
       <section className="vx-section">
         <h3>Market contracts using your skins</h3>
         {usingMine.length === 0 ? (
-          <p className="vx-empty">{owned ? "None of the current market contracts has a slot a skin you own can fill inside its float budget." : "Load an inventory first."}</p>
+          <p className="vx-empty">{owned ? "No market contract has a slot your skins fit inside its float budget." : "Load an inventory first."}</p>
         ) : (
           <ul className="vx-list">
             {usingMine.map((v) => {
@@ -149,19 +150,24 @@ export default function MyVentures({ market, images }: { market: VenturesFile; i
 function RedCard({
   item, rows, tracked, toggle,
 }: {
-  item: { name: string; wear: string; count: number };
+  item: { name: string; wear: string; count: number; copies?: { float: number | null }[] };
   rows: LonglistRow[];
   tracked: Record<string, unknown>;
   toggle: (key: string, back: number, title: string) => void;
 }) {
   const sell = rows[0].ownedValue;
+  const floats = (item.copies ?? []).filter((c) => c.float != null).map((c) => c.float!.toFixed(4)).join(", ");
   const best = [...rows].sort((a, b) => b.backPerDollar - a.backPerDollar).slice(0, 4);
   return (
     <div className="vx-red">
       <div className="vx-red__head">
         <span className="vx-red__mine">
           <SkinStack items={[{ key: item.name, name: item.name, count: item.count, rarity: "Covert", mine: true, note: item.wear }]} size={64} />
-          <span><b>{item.count}× {item.name}</b> <span className="dim">({abbr(item.wear)})</span></span>
+          <span>
+            <span className="owned-tag" style={{ ["--glow" as string]: rarityHex("Covert") }}>in your inventory{floats ? ` · ${floats}` : ""}</span>
+            <br />
+            <b>{item.count}× {item.name}</b> <span className="dim">({abbr(item.wear)})</span>
+          </span>
         </span>
         <span className="dim">just selling: {money(sell * item.count)} · or put {item.count > 1 ? "them" : "it"} in:</span>
       </div>
@@ -177,13 +183,13 @@ function RedCard({
               </span>
               <span className="vx-num"><b>{money(r.cost)}</b><span className="dim">entry</span></span>
               <span className="vx-num"><b className={r.backPerDollar >= 0.9 ? "" : "neg"}>{backShort(r.backPerDollar)}</b><span className="dim">back per $1</span></span>
-              <span className="vx-num" title="Chance one contract's knife sells for more than the entry cost (not the grand prize odds)"><b>{pct(r.pProfit)}</b><span className="dim">profit chance</span></span>
+              <span className="vx-num" title="Chance the knife sells for more than the entry (not the grand prize odds)"><b>{pct(r.pProfit)}</b><span className="dim">profit chance</span></span>
               {r.top[0] ? <GrandPrize imageKey={prizeKey(r.top[0].name)} name={r.top[0].name} value={money(r.top[0].value)} probability={r.top[0].probability} rarity="Extraordinary" /> : <span />}
             </li>
           );
         })}
       </ul>
-      <p className="vx-note">Rough by design: floats at grade middles, fillers at the lowest third-party ask, knives at the top buy order, Doppler phases split evenly. Check the floats before you buy.</p>
+      <p className="vx-note">Rough: floats at grade middles, fillers at lowest third-party ask, knives at top buy order, Doppler phases split evenly. Check floats before buying.</p>
     </div>
   );
 }

@@ -23,7 +23,7 @@ export default function Handoff({ plan }: { plan: Plan | null | undefined }) {
   const go = (withOwned: boolean) => {
     if (!plan) return;
     setSlots(toSlots(plan, withOwned));
-    router.push("/");
+    router.push("/console");
   };
   const mine = plan?.ownedCount ?? 0;
   return (
@@ -35,7 +35,7 @@ export default function Handoff({ plan }: { plan: Plan | null | undefined }) {
         className="hud"
         disabled={!plan || mine === 0}
         onClick={() => go(true)}
-        title={mine ? `${mine} slot${mine > 1 ? "s" : ""} from your inventory, the rest to buy for ${money(plan!.rest)}` : "No copy you own fits this contract's float budget"}
+        title={mine ? `${mine} slot${mine > 1 ? "s" : ""} from your inventory, rest ${money(plan!.rest)}` : "None of your copies fit the float budget"}
       >
         Pre-fill with what you have{mine > 0 ? ` · ${mine}` : ""}
       </button>

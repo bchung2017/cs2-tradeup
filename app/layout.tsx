@@ -7,8 +7,8 @@ import VentureToast from "@/components/VentureToast";
 import RegisterSW from "@/components/RegisterSW";
 
 export const metadata: Metadata = {
-  title: "CS2 Journeyman · Trade-Up Console",
-  description: "Single trade-up analysis. Probability, float, average payout.",
+  title: "CS2 Journeyman",
+  description: "Trade-up contracts checked against live prices.",
   applicationName: "Journeyman",
   appleWebApp: { capable: true, title: "Journeyman", statusBarStyle: "black" },
   icons: {
