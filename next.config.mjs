@@ -19,9 +19,14 @@ const nextConfig = {
       },
     ];
   },
-  // Venture is the front door; the trade-up console lives at /console.
+  // Venture is the front door; the trade-up simulator lives at /simulator.
   async redirects() {
-    return [{ source: "/", destination: "/venture/market", permanent: false }];
+    return [
+      { source: "/", destination: "/venture/market", permanent: false },
+      // the trade-up console was renamed the simulator; keep old links and
+      // installed-app shortcuts working
+      { source: "/console", destination: "/simulator", permanent: true },
+    ];
   },
 };
 export default nextConfig;

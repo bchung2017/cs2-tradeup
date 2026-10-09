@@ -106,7 +106,7 @@ export default function TradeUpConsole() {
       >
       <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
         <div>
-          <span className="hud hud-ember">TRADE-UP CONSOLE</span>
+          <span className="hud hud-ember">TRADE-UP SIMULATOR</span>
           <h1
             className="glow"
             style={{

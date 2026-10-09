@@ -150,7 +150,7 @@ export default function Profile() {
               </div>
             </>
           ) : (
-            <div style={{ color: "var(--fg-dim)", fontSize: 14 }}>No profile loaded. Load one in the console.</div>
+            <div style={{ color: "var(--fg-dim)", fontSize: 14 }}>No profile loaded. Load one in the simulator.</div>
           )}
         </div>
       </section>
@@ -164,7 +164,7 @@ export default function Profile() {
           SYNCED PROFILES
         </div>
         {profiles.length === 0 ? (
-          <div className="hud" style={{ padding: "14px 12px" }}>none yet. Load a profile in the console</div>
+          <div className="hud" style={{ padding: "14px 12px" }}>none yet. Load a profile in the simulator</div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>

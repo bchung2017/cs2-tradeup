@@ -97,7 +97,7 @@ export default function TopRail() {
 
       <div className="rail-links">
         <VentureMenu pathname={pathname} badge={ventureBadge} />
-        <SurfaceLink href="/console" label="CONSOLE" active={pathname === "/console"} />
+        <SurfaceLink href="/simulator" label="SIMULATOR" active={pathname === "/simulator"} />
         <SurfaceLink href="/inventory" label="INVENTORY" active={pathname === "/inventory"} />
       </div>
 

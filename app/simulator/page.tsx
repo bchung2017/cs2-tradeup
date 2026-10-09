@@ -8,12 +8,12 @@ import type { Metadata } from "next";
 import TradeUpConsole from "@/components/TradeUpConsole";
 import InventoryPanel from "@/components/InventoryPanel";
 
-export const metadata: Metadata = { title: "CS2 Journeyman · Console" };
+export const metadata: Metadata = { title: "CS2 Journeyman · Simulator" };
 
 export default function Page() {
   return (
     // On wide screens the two panels are side-by-side columns; below 860px the
-    // .app-shell media query stacks them into rows (console on top, inventory
+    // .app-shell media query stacks them into rows (simulator on top, inventory
     // below). See globals.css.
     <div className="app-shell">
       {/* left/top: trade-up visualizer (carries the shared CircuitBoard backdrop) */}

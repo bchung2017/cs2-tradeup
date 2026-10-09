@@ -55,7 +55,7 @@ export default function InventoryView() {
 
       {!steamid && (
         <div className="hud" style={{ marginTop: 24 }}>
-          NO PROFILE LOADED — LOAD ONE FROM THE CONSOLE
+          NO PROFILE LOADED — LOAD ONE IN THE SIMULATOR
         </div>
       )}
 
@@ -67,7 +67,7 @@ export default function InventoryView() {
 
       {steamid && !loading && items && items.length === 0 && (
         <div className="hud" style={{ marginTop: 24 }}>
-          {error ? error.toUpperCase() : "NO ITEMS"} — SYNC THIS PROFILE FROM THE CONSOLE
+          {error ? error.toUpperCase() : "NO ITEMS"} — SYNC THIS PROFILE IN THE SIMULATOR
         </div>
       )}
 

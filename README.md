@@ -1,6 +1,6 @@
 # CS2 Journeyman · Trade-Up Console
 
-Next.js (App Router) + TypeScript. A two-column console:
+Next.js (App Router) + TypeScript. A two-column trade-up simulator:
 
 - **Left — trade-up visualizer.** Stage same-rarity inputs, set per-slot floats,
   execute, and read outcome probabilities, output floats, EV, and per-outcome

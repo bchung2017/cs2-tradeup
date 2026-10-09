@@ -1,8 +1,8 @@
 "use client";
 
-// Venture → Console, two ways. "Open the stack" stages the contract as
+// Venture → Simulator, two ways. "Open the stack" stages the contract as
 // specified: every input at its float cap. "Pre-fill with what you have" puts
-// your fitting copies in their slots and leaves the rest to buy. Console takes
+// your fitting copies in their slots and leaves the rest to buy. The simulator takes
 // it from there and recomputes on every edit.
 import { useRouter } from "next/navigation";
 import { useTradeup, type Slot } from "@/lib/tradeup-context";
@@ -23,7 +23,7 @@ export default function Handoff({ plan }: { plan: Plan | null | undefined }) {
   const go = (withOwned: boolean) => {
     if (!plan) return;
     setSlots(toSlots(plan, withOwned));
-    router.push("/console");
+    router.push("/simulator");
   };
   const mine = plan?.ownedCount ?? 0;
   return (
