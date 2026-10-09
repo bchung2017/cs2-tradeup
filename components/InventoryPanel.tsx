@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useTradeup, isStatTrakName, inventoryInputEligibility } from "@/lib/tradeup-context";
+import { useTradeup, isStatTrakName, inventoryInputEligibility, readProfile, saveProfile } from "@/lib/tradeup-context";
 import { rarityHex } from "@/lib/display";
 import { lerp, numCompare } from "@/lib/util";
 import PriceModal from "@/components/PriceModal";
@@ -136,8 +136,10 @@ export default function InventoryPanel() {
 
   // Mirror the resolved profile to shared context so the trade-up header (left
   // side) can load this profile's avatar.
+  // Only a resolved id is mirrored: mounting with nothing loaded yet must not
+  // blank the profile another tab or an earlier visit already set.
   useEffect(() => {
-    setSharedSteamid(steamid);
+    if (steamid) setSharedSteamid(steamid);
   }, [steamid, setSharedSteamid]);
 
   // Tick every 10s so the relative "synced …" label stays current and flips to
@@ -200,7 +202,10 @@ export default function InventoryPanel() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const raw = input.trim();
+      // Reopen the profile loaded last in this browser, else the default.
+      const saved = readProfile().input?.trim();
+      if (saved && saved !== input) setInput(saved);
+      const raw = saved || input.trim();
       if (!raw) return;
       setLoading(true);
       try {
@@ -213,6 +218,7 @@ export default function InventoryPanel() {
         setSteamid(r.body.steamid);
         steamidRef.current = r.body.steamid;
         setLoadedInput(raw);
+        saveProfile({ steamid: r.body.steamid, input: raw });
         await loadAndRender();
       } finally {
         if (!cancelled) setLoading(false);
@@ -284,6 +290,7 @@ export default function InventoryPanel() {
     setSteamid(r.body!.steamid);
     steamidRef.current = r.body!.steamid;
     setLoadedInput(raw);
+    saveProfile({ steamid: r.body!.steamid, input: raw });
     setMsg("resolved // syncing...", "dim");
     await doSync();
     setLoading(false);
