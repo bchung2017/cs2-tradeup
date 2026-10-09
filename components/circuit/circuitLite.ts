@@ -1,19 +1,23 @@
 // Low-cost circuit background for phones and the installed app. Same circuit
 // artwork as circuitKoi.js, with the per-frame work cut to the bone:
-//   - drawn at half the screen's CSS resolution and stretched by the browser
-//   - everything static (substrate, traces, glow halo, resting vias, the
-//     brighter "lit" trace layer) baked once per resize, blurs included
-//   - each frame: one blit, a breathing glow as a second blit at varying alpha,
-//     a sheen as a clipped blit of the lit layer, and a handful of electrons
-//     as plain strokes; no shadowBlur, no per-segment color math, no koi
+//   - drawn at one backing pixel per CSS pixel (a third of a 3x phone screen),
+//     the same resolution the original's mobile path used, so 1px traces and
+//     via rings stay crisp instead of smearing when stretched
+//   - everything static (substrate, traces, glow halo, the brighter "lit"
+//     trace layer) baked once, blurs included; rebaked only when the width
+//     changes or the height changes by more than an address bar
+//   - each frame: two blits, a sheen as a clipped blit of the lit layer, the
+//     vias twinkling as plain arcs, and a handful of electrons as plain
+//     strokes; no shadowBlur, no per-segment color math, no koi
 //   - capped at 20 fps, stopped while the tab is hidden, a single still
 //     frame when the system asks for reduced motion
 import { CIRCUIT_DATA } from "./circuitData";
 
 type Pt = { x: number; y: number };
 interface Electron { tr: Pt[]; seg: number; t: number; hist: Pt[] }
+interface Via { x: number; y: number; ph: number }
 
-const SCALE = 0.5; // backing pixels per CSS pixel
+const SCALE = 1; // backing pixels per CSS pixel (not per device pixel)
 const FPS = 20;
 const MAX_ELECTRONS = 6;
 const BG = "#020507";
@@ -32,6 +36,7 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
   let paths: Pt[][] = [];
   let routes: Pt[][] = []; // traces long enough to carry an electron
   let electrons: Electron[] = [];
+  let vias: Via[] = [];
 
   function layout() {
     W = Math.max(1, Math.round(innerWidth * SCALE));
@@ -47,6 +52,14 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
       return p.length >= 4 && len > 40;
     });
     electrons = [];
+    const seen = new Set<string>();
+    vias = [];
+    for (const [x, y] of D.p) {
+      const px = x * s + ox, py = y * s + oy, k = `${Math.round(px)},${Math.round(py)}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      vias.push({ x: px, y: py, ph: Math.random() * 6.28 });
+    }
 
     const stroke = (c: CanvasRenderingContext2D) => {
       c.beginPath();
@@ -60,16 +73,9 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
     const b = base.getContext("2d")!;
     b.fillStyle = BG;
     b.fillRect(0, 0, W, H);
-    b.strokeStyle = "rgba(25,160,25,0.22)";
-    b.lineWidth = 0.75;
+    b.strokeStyle = "rgba(25,160,25,0.16)"; // the original's base trace
+    b.lineWidth = 1;
     stroke(b);
-    b.fillStyle = "rgba(51,255,51,0.22)";
-    b.strokeStyle = "rgba(25,160,25,0.2)";
-    for (const [x, y] of D.p) {
-      const px = x * s + ox, py = y * s + oy;
-      b.beginPath(); b.arc(px, py, 1.2, 0, 6.28); b.fill();
-      b.beginPath(); b.arc(px, py, 2.1, 0, 6.28); b.stroke();
-    }
     // a dark vignette, baked rather than drawn per frame
     const v = b.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.75);
     v.addColorStop(0, "rgba(0,0,0,0)");
@@ -80,15 +86,15 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
     const g = glow.getContext("2d")!;
     g.clearRect(0, 0, W, H);
     g.shadowColor = "rgba(60,255,150,0.9)";
-    g.shadowBlur = 4;
-    g.strokeStyle = "rgba(40,220,130,0.16)";
-    g.lineWidth = 1;
+    g.shadowBlur = 6;
+    g.strokeStyle = "rgba(40,220,130,0.08)";
+    g.lineWidth = 1.5;
     stroke(g);
 
     const l = lit.getContext("2d")!;
     l.clearRect(0, 0, W, H);
-    l.strokeStyle = "rgba(150,255,190,0.85)";
-    l.lineWidth = 0.9;
+    l.strokeStyle = "rgba(150,255,190,0.6)";
+    l.lineWidth = 1;
     stroke(l);
   }
 
@@ -102,7 +108,7 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
     if (p > 1) return;
     const diag = W + H, band = diag * 0.12, pos = -band + p * (diag + band * 2);
     ctx!.save();
-    ctx!.globalAlpha = Math.sin(p * Math.PI) * 0.7;
+    ctx!.globalAlpha = Math.sin(p * Math.PI) * 0.6;
     ctx!.beginPath(); // the band x + y ∈ [pos − band/2, pos + band/2]
     ctx!.moveTo(pos - band / 2, 0); ctx!.lineTo(pos + band / 2, 0);
     ctx!.lineTo(pos + band / 2 - H, H); ctx!.lineTo(pos - band / 2 - H, H);
@@ -118,7 +124,7 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
       const tr = routes[Math.floor(Math.random() * routes.length)];
       electrons.push({ tr, seg: 0, t: 0, hist: [] });
     }
-    const step = live.surge ? 0.3 : 0.15; // segment fraction per frame at 20 fps
+    const step = live.surge ? 0.15 : 0.075; // the original's per-frame pace, at 20 fps
     ctx!.globalCompositeOperation = "lighter";
     ctx!.lineCap = "round";
     electrons = electrons.filter((e) => {
@@ -128,27 +134,45 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
       const a = e.tr[e.seg], b = e.tr[e.seg + 1];
       const p = { x: a.x + (b.x - a.x) * e.t, y: a.y + (b.y - a.y) * e.t };
       e.hist.push(p);
-      if (e.hist.length > 6) e.hist.shift();
-      ctx!.strokeStyle = "rgba(120,255,140,0.35)";
-      ctx!.lineWidth = 1.2;
-      ctx!.beginPath();
-      ctx!.moveTo(e.hist[0].x, e.hist[0].y);
-      for (const h of e.hist) ctx!.lineTo(h.x, h.y);
-      ctx!.stroke();
-      ctx!.fillStyle = "rgba(120,255,140,0.18)";
-      ctx!.beginPath(); ctx!.arc(p.x, p.y, 3, 0, 6.28); ctx!.fill();
-      ctx!.fillStyle = "rgba(200,255,210,0.95)";
-      ctx!.beginPath(); ctx!.arc(p.x, p.y, 1.3, 0, 6.28); ctx!.fill();
+      if (e.hist.length > 10) e.hist.shift();
+      const n = e.hist.length;
+      for (let i = 1; i < n; i++) {
+        const f = i / n;
+        ctx!.strokeStyle = `rgba(120,255,140,${f * f * 0.5})`;
+        ctx!.lineWidth = 0.5 + f * 2;
+        ctx!.beginPath(); ctx!.moveTo(e.hist[i - 1].x, e.hist[i - 1].y); ctx!.lineTo(e.hist[i].x, e.hist[i].y); ctx!.stroke();
+      }
+      ctx!.fillStyle = "rgba(120,255,140,0.07)"; // stands in for the original's blur
+      ctx!.beginPath(); ctx!.arc(p.x, p.y, 9, 0, 6.28); ctx!.fill();
+      ctx!.fillStyle = "rgba(120,255,140,0.16)";
+      ctx!.beginPath(); ctx!.arc(p.x, p.y, 5, 0, 6.28); ctx!.fill();
+      ctx!.fillStyle = "rgba(180,255,190,0.95)";
+      ctx!.beginPath(); ctx!.arc(p.x, p.y, 2.4, 0, 6.28); ctx!.fill();
       return true;
     });
     ctx!.globalCompositeOperation = "source-over";
   }
 
+  // vias as the original draws them at rest: a dot and a ring, each slowly
+  // breathing on its own phase
+  function drawVias(t: number) {
+    const k = 0.4 + live.intensity;
+    ctx!.lineWidth = 1;
+    for (const v of vias) {
+      const b = (0.2 + 0.5 * (0.5 + 0.5 * Math.sin(t * 1.4 + v.ph))) * k;
+      ctx!.fillStyle = `rgba(51,255,51,${b * 0.3})`;
+      ctx!.beginPath(); ctx!.arc(v.x, v.y, 2.3, 0, 6.28); ctx!.fill();
+      ctx!.strokeStyle = `rgba(25,160,25,${b * 0.22})`;
+      ctx!.beginPath(); ctx!.arc(v.x, v.y, 4.2, 0, 6.28); ctx!.stroke();
+    }
+  }
+
   function draw(t: number, still = false) {
     ctx!.drawImage(base, 0, 0);
-    ctx!.globalAlpha = still ? 0.6 : 0.45 + 0.35 * (0.5 + 0.5 * Math.sin(t * 0.6)) + live.intensity * 0.2;
+    ctx!.globalAlpha = still ? 0.8 : 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(t * 0.6));
     ctx!.drawImage(glow, 0, 0);
     ctx!.globalAlpha = 1;
+    drawVias(t);
     if (still) return;
     drawSheen(t);
     drawElectrons();
@@ -164,9 +188,17 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
     draw(now / 1000);
   }
 
+  // Android fires resize as the address bar slides in and out while
+  // scrolling; rebaking for that would stutter. Rebake for real changes only.
+  let lastW = innerWidth, lastH = innerHeight, resizeTimer = 0;
   function onResize() {
-    layout();
-    draw(performance.now() / 1000, reduced);
+    if (innerWidth === lastW && Math.abs(innerHeight - lastH) < 160) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      lastW = innerWidth; lastH = innerHeight;
+      layout();
+      draw(performance.now() / 1000, reduced);
+    }, 150);
   }
   function onVisibility() {
     cancelAnimationFrame(raf);
@@ -187,6 +219,7 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
     destroy() {
       stopped = true;
       cancelAnimationFrame(raf);
+      clearTimeout(resizeTimer);
       removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisibility);
     },

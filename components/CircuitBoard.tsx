@@ -6,7 +6,12 @@ import { initCircuitLite } from "./circuit/circuitLite";
 
 // Phones and tablets (and the installed app on them) get the lite renderer:
 // half resolution, baked layers, 20 fps, no water or koi.
-const isTouch = () => matchMedia("(pointer: coarse)").matches;
+// ?bg=lite or ?bg=full forces one, for comparing them on a device.
+const isTouch = () => {
+  const forced = new URLSearchParams(location.search).get("bg");
+  if (forced === "lite" || forced === "full") return forced === "lite";
+  return matchMedia("(pointer: coarse)").matches;
+};
 
 interface Props {
   /** 0..1 ambient activity (filled slots / count). */
