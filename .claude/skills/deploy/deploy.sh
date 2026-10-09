@@ -94,7 +94,7 @@ sync() {
 
 verify() {
   [ -f "$GITDIR/MERGE_HEAD" ] && die 11 "merge still open; resolve and commit first"
-  rm -rf .next/dev # stale route types from a dev server break tsc
+  rm -rf .next/dev .next/types # stale generated route types (dev server, old builds) break tsc
   say "typecheck…"
   npx tsc --noEmit -p . || { restore_generated; die 20 "typecheck failed"; }
   if [ "${DEPLOY_SKIP_BUILD:-0}" != "1" ]; then
