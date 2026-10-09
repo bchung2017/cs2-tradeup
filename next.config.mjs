@@ -6,5 +6,18 @@ const nextConfig = {
   // own optional-native and dynamic requires. Both load as plain runtime
   // requires instead.
   serverExternalPackages: ["better-sqlite3", "pg"],
+  // The service worker must never be served stale, or an installed app would
+  // keep running old code after a deploy.
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
+    ];
+  },
 };
 export default nextConfig;

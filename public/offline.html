@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>Journeyman · offline</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #cfe8cf; font: 14px/1.5 "JetBrains Mono", ui-monospace, monospace; }
+  main { min-height: 100%; display: flex; flex-direction: column; justify-content: center; padding: 0 16px; max-width: 520px; margin: 0 auto; }
+  h1 { color: #33ff33; font-size: 22px; margin: 0 0 8px; }
+  .dim { color: #19a019; }
+  button { margin-top: 18px; align-self: flex-start; background: #0a120a; color: #33ff33; border: 1px solid #19a019; padding: 10px 16px; font: inherit; letter-spacing: 0.12em; }
+</style>
+</head>
+<body>
+<main>
+  <span class="dim">$ journeyman</span>
+  <h1>no connection</h1>
+  <p>Prices and inventories are live, so there's nothing useful to show offline. Reconnect and try again.</p>
+  <button onclick="location.reload()">RETRY</button>
+</main>
+</body>
+</html>

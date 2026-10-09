@@ -4,10 +4,20 @@ import { TradeupProvider } from "@/lib/tradeup-context";
 import TopRail from "@/components/TopRail";
 import CircuitBoard from "@/components/CircuitBoard";
 import VentureToast from "@/components/VentureToast";
+import RegisterSW from "@/components/RegisterSW";
 
 export const metadata: Metadata = {
   title: "CS2 Journeyman · Trade-Up Console",
   description: "Single trade-up analysis. Probability, float, average payout.",
+  applicationName: "Journeyman",
+  appleWebApp: { capable: true, title: "Journeyman", statusBarStyle: "black" },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: "/icons/apple-touch-icon.png",
+  },
 };
 
 // Explicit viewport so the layout scales to the device width on mobile (the
@@ -15,6 +25,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Colors the Android status bar and task switcher to match the app.
+  themeColor: "#000000",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -37,6 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
           <VentureToast />
         </TradeupProvider>
+        <RegisterSW />
       </body>
     </html>
   );
