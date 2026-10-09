@@ -3,7 +3,7 @@
 // happened yet.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExpiredFile, VenturesFile } from "@/lib/ventures";
+import type { ExpiredFile, LonglistFile, VenturesFile } from "@/lib/ventures";
 import { loadSkinById, loadSkins } from "@/lib/data";
 
 const DATA_DIR = join(/*turbopackIgnore: true*/ process.cwd(), "public", "data");
@@ -14,6 +14,7 @@ function read<T>(file: string, fallback: T): T {
 }
 
 export const loadVentures = (): VenturesFile => read<VenturesFile>("ventures.json", { generatedAt: "", ventures: [] });
+export const loadLonglist = (): LonglistFile => read<LonglistFile>("ventures-longlist.json", { generatedAt: "", rows: [] });
 export const loadExpired = (): ExpiredFile => read<ExpiredFile>("ventures-expired.json", { rows: [] });
 
 // Catalog images for the skins a page shows, keyed by skin id (market rows) or

@@ -102,6 +102,17 @@ export interface LonglistRow {
   firstSeenAt: string;
 }
 
+// Some outcome sells for more than the contract costs, however unlikely or
+// slow to sell. Contracts where every outcome loses are dropped from the surface.
+export const canProfit = (v: Venture) => v.outcomes.some((o) => (o.value ?? 0) > v.cost);
+export const rowCanProfit = (r: LonglistRow) => (r.top[0]?.value ?? 0) > r.cost;
+
+// Longlist outcome names carry the wear ("★ Karambit | Fade (FN)"); catalog
+// pictures are keyed by the bare skin name.
+export const prizeKey = (name: string) => name.replace(/ \([^)]+\)$/, "");
+// The outcome behind `best`, for its skin id and rarity.
+export const bestOutcome = (v: Venture) => v.outcomes.find((o) => o.name === v.best.name && o.wear === v.best.wear) ?? v.outcomes.find((o) => o.name === v.best.name);
+
 export interface VenturesFile {
   generatedAt: string;
   ventures: Venture[];

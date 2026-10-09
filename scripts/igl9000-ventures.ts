@@ -12,7 +12,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import type { ExpiredFile, LonglistFile, Venture, VenturesFile } from "@/lib/ventures";
+import { canProfit, rowCanProfit, type ExpiredFile, type LonglistFile, type Venture, type VenturesFile } from "@/lib/ventures";
 
 const argv = process.argv.slice(2);
 const arg = (k: string) => {
@@ -42,7 +42,7 @@ const prev = read<VenturesFile>(`${OUT}/ventures.json`, { generatedAt: now, vent
 const seen = new Map(prev.ventures.map((v) => [v.key, v.firstSeenAt]));
 const fresh: Venture[] = [...read<Venture[]>(`${TMP}/sweep.json`, []), ...read<Venture[]>(`${TMP}/knife.json`, [])];
 const byKey = new Map<string, Venture>();
-for (const v of fresh) if (!byKey.has(v.key)) byKey.set(v.key, { ...v, firstSeenAt: seen.get(v.key) ?? v.firstSeenAt });
+for (const v of fresh) if (canProfit(v) && !byKey.has(v.key)) byKey.set(v.key, { ...v, firstSeenAt: seen.get(v.key) ?? v.firstSeenAt });
 const ventures = [...byKey.values()].sort((a, b) => b.backPerDollar - a.backPerDollar);
 writeFileSync(`${OUT}/ventures.json`, JSON.stringify({ generatedAt: now, ventures } satisfies VenturesFile));
 
@@ -50,7 +50,7 @@ writeFileSync(`${OUT}/ventures.json`, JSON.stringify({ generatedAt: now, venture
 const prevLong = read<LonglistFile>(`${OUT}/ventures-longlist.json`, { generatedAt: now, rows: [] });
 const seenLong = new Map(prevLong.rows.map((r) => [r.key, r.firstSeenAt]));
 const long = read<LonglistFile>(`${TMP}/longlist.json`, { generatedAt: now, rows: [] });
-const rows = long.rows.map((r) => ({ ...r, firstSeenAt: seenLong.get(r.key) ?? r.firstSeenAt }));
+const rows = long.rows.filter(rowCanProfit).map((r) => ({ ...r, firstSeenAt: seenLong.get(r.key) ?? r.firstSeenAt }));
 writeFileSync(`${OUT}/ventures-longlist.json`, JSON.stringify({ generatedAt: now, rows } satisfies LonglistFile));
 
 // ── expired: market ventures that were there last run and aren't now ───────
