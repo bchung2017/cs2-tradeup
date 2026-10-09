@@ -18,9 +18,9 @@ import SkinStack, { ImagesProvider, type StackItem } from "./SkinStack";
 
 // a longlist contract as pictures: your red, then the filler (one picture if they're the same skin)
 function redStack(r: LonglistRow): StackItem[] {
-  if (r.filler === r.owned) return [{ key: r.owned, name: r.owned, count: r.ownedCount + r.fillerCount, rarity: "Covert" }];
+  if (r.filler === r.owned) return [{ key: r.owned, name: r.owned, count: r.ownedCount + r.fillerCount, rarity: "Covert", mine: true, note: `${r.ownedCount} yours + ${r.fillerCount} to buy` }];
   return [
-    { key: r.owned, name: r.owned, count: r.ownedCount, rarity: "Covert", note: `yours, ${r.ownedWear}` },
+    { key: r.owned, name: r.owned, count: r.ownedCount, rarity: "Covert", mine: true, note: r.ownedWear },
     { key: r.filler, name: r.filler, count: r.fillerCount, rarity: "Covert", note: `buy, ${r.fillerWear}` },
   ];
 }
@@ -159,7 +159,10 @@ function RedCard({
   return (
     <div className="vx-red">
       <div className="vx-red__head">
-        <span><b>{item.count}× {item.name}</b> <span className="dim">({abbr(item.wear)})</span></span>
+        <span className="vx-red__mine">
+          <SkinStack items={[{ key: item.name, name: item.name, count: item.count, rarity: "Covert", mine: true, note: item.wear }]} size={64} label={false} />
+          <span><b>{item.count}× {item.name}</b> <span className="dim">({abbr(item.wear)})</span></span>
+        </span>
         <span className="dim">just selling: {money(sell * item.count)} · or put {item.count > 1 ? "them" : "it"} in:</span>
       </div>
       <ul className="vx-red__opts">

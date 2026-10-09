@@ -11,7 +11,7 @@ const Images = createContext<Record<string, string>>({});
 export const ImagesProvider = Images.Provider;
 export const useImages = () => useContext(Images);
 
-export interface StackItem { key: string; name: string; count: number; rarity?: string | null; note?: string }
+export interface StackItem { key: string; name: string; count: number; rarity?: string | null; note?: string; mine?: boolean }
 
 // Inputs → one entry per skin (two wears of the same skin are one picture).
 export function stackInputs(inputs: { skinId: string; skin: string; wear: string; count: number; rarity: string }[]): StackItem[] {
@@ -31,7 +31,7 @@ export default function SkinStack({ items, size = 44, label = true }: { items: S
   return (
     <div className="vx-stack">
       {items.map((it) => (
-        <figure key={it.key} className="vx-skin" style={{ width: size, borderBottomColor: rarityHex(it.rarity) }} title={`${it.count}× ${it.name}${it.note ? ` (${it.note})` : ""}`}>
+        <figure key={it.key} className={`vx-skin${it.mine ? " is-mine" : ""}`} style={{ width: size, borderBottomColor: rarityHex(it.rarity) }} title={`${it.count}× ${it.name}${it.note ? ` (${it.note})` : ""}${it.mine ? " · yours" : ""}`}>
           <Thumb src={images[it.key]} alt={it.name} w={size} h={Math.round(size * 0.75)} />
           <figcaption className="vx-skin__count">×{it.count}</figcaption>
         </figure>

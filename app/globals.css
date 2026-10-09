@@ -363,3 +363,7 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 }
 .vx-stack__lbl { font-size: 10px; letter-spacing: 0.06em; align-self: center; margin-left: 2px; }
 .vx-table .vx-thumb { width: 36px; height: 27px; object-fit: contain; vertical-align: middle; margin-right: 6px; background: var(--surface-2); }
+.vx-skin.is-mine { border-color: var(--green); box-shadow: 0 0 0 1px var(--green-dim); }
+.vx-skin.is-mine .vx-skin__count { background: var(--green); }
+.vx-red__head { align-items: center; }
+.vx-red__mine { display: inline-flex; align-items: center; gap: 12px; }
