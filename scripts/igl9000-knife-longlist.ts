@@ -110,6 +110,7 @@ for (const A of pools) {
           if (priced < 0.95) continue; // too much of the pool unpriced to say anything
           const cost = own * v + nf * f.ask;
           const best = outs.reduce((a, o) => (o.v > a.v ? o : a));
+          if (best.v <= cost) continue; // no outcome beats the cost
           options.push({
             owned: s.name, ownedWear: ABBR[g.wear], ownedCount: own, ownedValue: v,
             filler: f.skin.name, fillerWear: ABBR[f.wear], fillerCount: nf, fillerAsk: f.ask,
