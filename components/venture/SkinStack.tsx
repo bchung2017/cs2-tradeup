@@ -25,9 +25,8 @@ export function stackInputs(inputs: { skinId: string; skin: string; wear: string
   return [...by.values()].map(({ wears, ...it }) => ({ ...it, note: wears.join(", ") }));
 }
 
-export default function SkinStack({ items, size = 44, label = true }: { items: StackItem[]; size?: number; label?: boolean }) {
+export default function SkinStack({ items, size = 44 }: { items: StackItem[]; size?: number }) {
   const images = useImages();
-  const n = items.length;
   return (
     <div className="vx-stack">
       {items.map((it) => (
@@ -36,7 +35,6 @@ export default function SkinStack({ items, size = 44, label = true }: { items: S
           <figcaption className="vx-skin__count">×{it.count}</figcaption>
         </figure>
       ))}
-      {label && <span className="vx-stack__lbl dim">{n} different skin{n === 1 ? "" : "s"}</span>}
     </div>
   );
 }

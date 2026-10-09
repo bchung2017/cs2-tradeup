@@ -160,7 +160,7 @@ function RedCard({
     <div className="vx-red">
       <div className="vx-red__head">
         <span className="vx-red__mine">
-          <SkinStack items={[{ key: item.name, name: item.name, count: item.count, rarity: "Covert", mine: true, note: item.wear }]} size={64} label={false} />
+          <SkinStack items={[{ key: item.name, name: item.name, count: item.count, rarity: "Covert", mine: true, note: item.wear }]} size={64} />
           <span><b>{item.count}× {item.name}</b> <span className="dim">({abbr(item.wear)})</span></span>
         </span>
         <span className="dim">just selling: {money(sell * item.count)} · or put {item.count > 1 ? "them" : "it"} in:</span>
