@@ -75,20 +75,54 @@ export function Thumb({ src, alt, w, h }: { src?: string; alt: string; w: number
   return <img src={src} alt={alt} width={w} height={h} loading="lazy" onError={() => setFailed(true)} />;
 }
 
-// The best outcome, spelled out as the grand prize with its own odds, so the
-// profit chance next to it isn't read as the chance of hitting it.
-export function GrandPrize({ imageKey, name, value, probability, rarity }: { imageKey: string; name: string; value: string; probability: number; rarity?: string | null }) {
+// Every slot of the contract as its own picture, 5 or 10 of them; the copies
+// you own glow, with one tag saying how many are yours.
+export function SlotStrip({ items, size = 38 }: { items: StackItem[]; size?: number }) {
   const images = useImages();
-  const odds = probability <= 0 ? "never" : `1 in ${Math.round(1 / probability)}`;
+  const slots = items.flatMap((it) => Array.from({ length: it.count }, (_, k) => ({ it, k })));
+  const mine = items.filter((it) => it.mine).reduce((a, it) => a + it.count, 0);
   return (
-    <div className="vx-prize" title={`Grand prize: ${name}, ${value}. ${odds} contracts (${(probability * 100).toFixed(1)}%).`}>
-      <span className="vx-prize__img" style={{ borderBottomColor: rarityHex(rarity) }}><Thumb src={images[imageKey]} alt={name} w={52} h={39} /></span>
-      <span className="vx-prize__txt">
-        <span className="vx-prize__lbl">grand prize</span>
-        <b>{value}</b>
-        <span className="vx-prize__name">{name.replace(/^★ /, "")}</span>
-        <span className="dim">{odds} chance</span>
-      </span>
+    <div className="vx-strip">
+      {mine > 0 && <span className="owned-tag" style={{ ["--glow" as string]: rarityHex(items.find((it) => it.mine)?.rarity) }}>{mine} yours</span>}
+      <div className="vx-strip__slots">
+        {slots.map(({ it, k }) => (
+          <figure
+            key={`${it.key}|${k}`}
+            className={`vx-skin${it.mine ? " owned-glow" : ""}`}
+            style={{ width: size, borderBottomColor: rarityHex(it.rarity), ["--glow" as string]: rarityHex(it.rarity) }}
+            title={`${it.name}${it.note ? ` (${it.note})` : ""}${it.mine ? " · in your inventory" : ""}`}
+          >
+            <Thumb src={images[it.imageKey ?? it.key] ?? it.image} alt={it.name} w={size} h={Math.round(size * 0.75)} />
+          </figure>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export interface Roll { imageKey: string; name: string; value: number | null; probability: number; rarity?: string | null }
+
+// The best few outcomes as pictures: the grand prize first, then the next
+// best, each with its own value and odds.
+export function BestRolls({ rolls, money }: { rolls: Roll[]; money: (n: number | null) => string }) {
+  const images = useImages();
+  if (!rolls.length) return <span />;
+  return (
+    <div className="vx-rolls">
+      <span className="vx-rolls__lbl">grand prize · next best</span>
+      <div className="vx-rolls__row">
+        {rolls.map((r, i) => {
+          const odds = r.probability <= 0 ? "never" : `1 in ${Math.round(1 / r.probability)}`;
+          return (
+            <figure key={r.name} className={`vx-roll${i === 0 ? " is-top" : ""}`} title={`${i === 0 ? "Grand prize: " : ""}${r.name}, ${money(r.value)}. ${odds} contracts (${(r.probability * 100).toFixed(1)}%).`}>
+              <span className="vx-roll__img" style={{ borderBottomColor: rarityHex(r.rarity) }}><Thumb src={images[r.imageKey]} alt={r.name} w={60} h={45} /></span>
+              <b>{money(r.value)}</b>
+              <span className="dim">{odds}</span>
+            </figure>
+          );
+        })}
+      </div>
+      <span className="vx-rolls__name">{rolls[0].name.replace(/^★ /, "")}</span>
     </div>
   );
 }

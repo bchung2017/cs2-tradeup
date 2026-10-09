@@ -15,7 +15,7 @@ import { useVenturePlans } from "@/lib/venture-fit";
 import { rarityHex } from "@/lib/display";
 import VentureRow from "./VentureRow";
 import Ago from "./Ago";
-import SkinStack, { GrandPrize, ImagesProvider, type StackItem } from "./SkinStack";
+import SkinStack, { BestRolls, ImagesProvider, SlotStrip, type StackItem } from "./SkinStack";
 
 // a longlist contract as pictures: your red, then the filler (one picture if they're the same skin)
 function redStack(r: LonglistRow): StackItem[] {
@@ -178,13 +178,13 @@ function RedCard({
             <li key={r.key}>
               <button className={`vx-star${tracked[r.key] ? " is-on" : ""}`} onClick={() => toggle(r.key, r.backPerDollar, title)} aria-label="Track">{tracked[r.key] ? "★" : "☆"}</button>
               <span>
-                <SkinStack items={redStack(r)} size={38} />
+                <SlotStrip items={redStack(r)} />
                 + {r.fillerCount}× {r.filler} <span className="dim">({r.fillerWear}) @ {money(r.fillerAsk)} · {r.pools.join(" + ")} · {r.knifeItems} knives</span>
               </span>
               <span className="vx-num"><b>{money(r.cost)}</b><span className="dim">entry</span></span>
               <span className="vx-num"><b className={r.backPerDollar >= 0.9 ? "" : "neg"}>{backShort(r.backPerDollar)}</b><span className="dim">back per $1</span></span>
               <span className="vx-num" title="Chance the knife sells for more than the entry (not the grand prize odds)"><b>{pct(r.pProfit)}</b><span className="dim">profit chance</span></span>
-              {r.top[0] ? <GrandPrize imageKey={prizeKey(r.top[0].name)} name={r.top[0].name} value={money(r.top[0].value)} probability={r.top[0].probability} rarity="Extraordinary" /> : <span />}
+              <BestRolls money={money} rolls={r.top.map((t) => ({ imageKey: prizeKey(t.name), name: t.name, value: t.value, probability: t.probability, rarity: "Extraordinary" }))} />
             </li>
           );
         })}

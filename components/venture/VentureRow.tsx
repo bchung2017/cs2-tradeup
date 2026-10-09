@@ -4,13 +4,13 @@
 // how much comes back, the jackpot and its odds, the float budget, freshness and
 // the verdict. Click to open the full recipe.
 import { useState } from "react";
-import { bestOutcome, type Venture } from "@/lib/ventures";
+import { topOutcomes, type Venture } from "@/lib/ventures";
 import { rarityHex } from "@/lib/display";
 import { abbr, backShort, money, pct, TIER_SHORT, VERDICT } from "@/lib/venture-copy";
 import VentureDetail from "./VentureDetail";
 import Ago from "./Ago";
 import { isReady, type Plan } from "@/lib/venture-fit";
-import SkinStack, { GrandPrize, stackPlan } from "./SkinStack";
+import { BestRolls, SlotStrip, stackPlan } from "./SkinStack";
 
 export default function VentureRow({
   v, tracked, onTrack, plan, isNew, open: openInit = false,
@@ -26,7 +26,6 @@ export default function VentureRow({
   const verdict = VERDICT[v.verdict];
   const room = v.float.max - v.float.sum;
   const ready = isReady(v, plan);
-  const best = bestOutcome(v);
   return (
     <li className={`vx-row${open ? " is-open" : ""}`} id={v.key}>
       <div className="vx-line" onClick={() => setOpen((o) => !o)} role="button" tabIndex={0} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setOpen((o) => !o)} aria-expanded={open}>
@@ -44,7 +43,7 @@ export default function VentureRow({
         </div>
 
         <div className="vx-what">
-          <SkinStack items={stackPlan(v.inputs, plan)} />
+          <SlotStrip items={stackPlan(v.inputs, plan)} />
           <div className="vx-inputs">
             {v.inputs.map((i) => (
               <span key={`${i.skinId}|${i.wear}`}>{i.count}× {i.skin} <span className="dim">{abbr(i.wear)} ≤{i.floatMax.toFixed(2)}</span></span>
@@ -61,7 +60,7 @@ export default function VentureRow({
         <div className="vx-num vx-num--back"><b className={v.backPerDollar >= 1 ? "pos" : v.backPerDollar >= 0.85 ? "" : "neg"}>{backShort(v.backPerDollar)}</b><span className="dim">back per $1</span></div>
         <div className="vx-num vx-num--pays" title="Chance the outcome sells for more than the entry (not the grand prize odds)"><b>{pct(v.pProfit)}</b><span className="dim">profit chance</span></div>
         <div className="vx-jackpot">
-          <GrandPrize imageKey={best?.skinId ?? ""} name={v.best.name} value={money(v.best.value)} probability={v.best.probability} rarity={best?.rarity} />
+          <BestRolls money={money} rolls={topOutcomes(v).map((o) => ({ imageKey: o.skinId, name: o.name, value: o.value, probability: o.probability, rarity: o.rarity }))} />
         </div>
         <div className="vx-room" title={`float budget: ${v.float.sum.toFixed(3)} of ${v.float.max.toFixed(3)}`}>
           <div className="vx-room__bar"><div style={{ width: `${Math.min(100, (v.float.sum / v.float.max) * 100)}%`, background: room < 0.02 ? "var(--amber)" : "var(--green-dim)" }} /></div>
