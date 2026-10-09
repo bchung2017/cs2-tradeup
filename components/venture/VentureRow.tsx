@@ -10,7 +10,7 @@ import { abbr, backShort, money, pct, TIER_SHORT, VERDICT } from "@/lib/venture-
 import VentureDetail from "./VentureDetail";
 import Ago from "./Ago";
 import { isReady, type Plan } from "@/lib/venture-fit";
-import SkinStack, { GrandPrize, stackInputs } from "./SkinStack";
+import SkinStack, { GrandPrize, stackPlan } from "./SkinStack";
 
 export default function VentureRow({
   v, tracked, onTrack, plan, isNew, open: openInit = false,
@@ -44,7 +44,7 @@ export default function VentureRow({
         </div>
 
         <div className="vx-what">
-          <SkinStack items={stackInputs(v.inputs)} />
+          <SkinStack items={stackPlan(v.inputs, plan)} />
           <div className="vx-inputs">
             {v.inputs.map((i) => (
               <span key={`${i.skinId}|${i.wear}`}>{i.count}× {i.skin} <span className="dim">{abbr(i.wear)} ≤{i.floatMax.toFixed(2)}</span></span>
@@ -53,13 +53,13 @@ export default function VentureRow({
           <div className="vx-cols dim">
             {v.collections.map((c) => c.replace(/^The /, "").replace(/ Collection$/, "")).join(" + ")} · {v.outcomes.length} outcomes
             {isNew && <span className="vx-new">NEW</span>}
-            {ready && <span className="vx-ready" title={`Ready: ${plan!.ownedCount} slot${plan!.ownedCount > 1 ? "s" : ""} from your inventory fit the float budget, and the contract holds at live prices`} aria-label="ready with skins you own">●</span>}
+            {ready && <span className="vx-ready" title={`Ready: ${plan!.ownedCount} slot${plan!.ownedCount > 1 ? "s" : ""} from your inventory fit, and it pays back at live prices`} aria-label="ready with skins you own">●</span>}
           </div>
         </div>
 
         <div className="vx-num vx-num--cost"><b>{money(v.cost)}</b><span className="dim">entry</span></div>
         <div className="vx-num vx-num--back"><b className={v.backPerDollar >= 1 ? "pos" : v.backPerDollar >= 0.85 ? "" : "neg"}>{backShort(v.backPerDollar)}</b><span className="dim">back per $1</span></div>
-        <div className="vx-num vx-num--pays" title="Chance one contract's outcome sells for more than the entry cost (not the grand prize odds)"><b>{pct(v.pProfit)}</b><span className="dim">profit chance</span></div>
+        <div className="vx-num vx-num--pays" title="Chance the outcome sells for more than the entry (not the grand prize odds)"><b>{pct(v.pProfit)}</b><span className="dim">profit chance</span></div>
         <div className="vx-jackpot">
           <GrandPrize imageKey={best?.skinId ?? ""} name={v.best.name} value={money(v.best.value)} probability={v.best.probability} rarity={best?.rarity} />
         </div>

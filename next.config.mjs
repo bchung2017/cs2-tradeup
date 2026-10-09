@@ -6,5 +6,9 @@ const nextConfig = {
   // own optional-native and dynamic requires. Both load as plain runtime
   // requires instead.
   serverExternalPackages: ["better-sqlite3", "pg"],
+  // Venture is the front door; the trade-up console lives at /console.
+  async redirects() {
+    return [{ source: "/", destination: "/venture/market", permanent: false }];
+  },
 };
 export default nextConfig;

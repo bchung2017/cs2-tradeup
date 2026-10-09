@@ -153,11 +153,15 @@ export default function TradeUpConsole() {
 
       {/* slot grid — 5 columns on desktop, 3 on phones (see .slot-grid) */}
       <div className="slot-grid" style={{ marginTop: 16 }}>
-        {slots.map((slot, i) => (
+        {slots.map((slot, i) => {
+          // from your inventory: picked from it, or a Venture handed over your copy
+          const owned = !!slot.skin && (slot.origin === "owned" || slot.skin.id.startsWith("inv-"));
+          return (
           <div
             key={i}
-            className={slot.skin ? "bracket card-hover" : "bracket"}
+            className={`${slot.skin ? "bracket card-hover" : "bracket"}${owned ? " owned-glow" : ""}`}
             style={{
+              ["--glow" as string]: slot.skin ? rarityHex(slot.skin.rarity.name) : undefined,
               border: slot.skin
                 ? `3px solid ${rarityHex(slot.skin.rarity.name)}`
                 : "1px dashed var(--surface-line)",
@@ -172,16 +176,11 @@ export default function TradeUpConsole() {
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <span className="hud">{String(i + 1).padStart(2, "0")}</span>
-              {/* Handed over from a Venture: your copy, or one still to buy. */}
-              {slot.skin && slot.origin && (
-                <span
-                  className="hud"
-                  title={slot.origin === "owned" ? "from your inventory" : "to buy at or under this float"}
-                  style={{ fontSize: 8, color: slot.origin === "owned" ? "var(--green)" : "var(--cream-dim)" }}
-                >
-                  {slot.origin === "owned" ? "OWNED" : "BUY"}
-                </span>
-              )}
+              {owned ? (
+                <span className="owned-tag" title="this copy is in your inventory">yours</span>
+              ) : slot.skin && slot.origin === "buy" ? (
+                <span className="hud" title="to buy at or under this float" style={{ fontSize: 8, color: "var(--cream-dim)" }}>BUY</span>
+              ) : null}
             </div>
 
             {slot.skin ? (
@@ -300,7 +299,8 @@ export default function TradeUpConsole() {
               </button>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>

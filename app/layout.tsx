@@ -6,8 +6,8 @@ import CircuitBoard from "@/components/CircuitBoard";
 import VentureToast from "@/components/VentureToast";
 
 export const metadata: Metadata = {
-  title: "CS2 Journeyman · Trade-Up Console",
-  description: "Single trade-up analysis. Probability, float, average payout.",
+  title: "CS2 Journeyman",
+  description: "Trade-up contracts checked against live prices.",
 };
 
 // Explicit viewport so the layout scales to the device width on mobile (the
