@@ -41,9 +41,27 @@ export default function SkinStack({ items, size = 44 }: { items: StackItem[]; si
 
 // A picture that falls back to a "?" tile when it's missing or fails to load,
 // so a dead image never spills its alt text across the row.
-function Thumb({ src, alt, w, h }: { src?: string; alt: string; w: number; h: number }) {
+export function Thumb({ src, alt, w, h }: { src?: string; alt: string; w: number; h: number }) {
   const [failed, setFailed] = useState(false);
   if (!src || failed) return <span className="vx-skin__none" style={{ height: h }} title={alt}>?</span>;
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={src} alt={alt} width={w} height={h} loading="lazy" onError={() => setFailed(true)} />;
+}
+
+// The best outcome, spelled out as the grand prize with its own odds, so the
+// profit chance next to it isn't read as the chance of hitting it.
+export function GrandPrize({ imageKey, name, value, probability, rarity }: { imageKey: string; name: string; value: string; probability: number; rarity?: string | null }) {
+  const images = useImages();
+  const odds = probability <= 0 ? "never" : `1 in ${Math.round(1 / probability)}`;
+  return (
+    <div className="vx-prize" title={`Grand prize: ${name}, ${value}. Comes out ${odds} contracts (${(probability * 100).toFixed(1)}%).`}>
+      <span className="vx-prize__img" style={{ borderBottomColor: rarityHex(rarity) }}><Thumb src={images[imageKey]} alt={name} w={52} h={39} /></span>
+      <span className="vx-prize__txt">
+        <span className="vx-prize__lbl">grand prize</span>
+        <b>{value}</b>
+        <span className="vx-prize__name">{name.replace(/^★ /, "")}</span>
+        <span className="dim">{odds} chance</span>
+      </span>
+    </div>
+  );
 }

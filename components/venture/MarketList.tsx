@@ -26,7 +26,7 @@ const TRUST: Record<string, number> = { holds: 0, paper: 1, dead: 2, model: 2, u
 const trust = (fn: (a: Venture, b: Venture) => number) => (a: Venture, b: Venture) => TRUST[a.verdict] - TRUST[b.verdict] || fn(a, b);
 const SORTS = {
   back: { label: "Most back per $1", fn: trust((a: Venture, b: Venture) => b.backPerDollar - a.backPerDollar) },
-  pays: { label: "Most likely to pay", fn: trust((a: Venture, b: Venture) => b.pProfit - a.pProfit) },
+  pays: { label: "Highest profit chance", fn: trust((a: Venture, b: Venture) => b.pProfit - a.pProfit) },
   ahead: { label: "Ahead after 5 pulls", fn: trust((a: Venture, b: Venture) => (b.pAhead.at(-1)?.p ?? 0) - (a.pAhead.at(-1)?.p ?? 0)) },
   cheap: { label: "Entry: lowest first", fn: (a: Venture, b: Venture) => a.cost - b.cost },
   pricey: { label: "Entry: highest first", fn: (a: Venture, b: Venture) => b.cost - a.cost },
@@ -117,7 +117,7 @@ export default function MarketList({ data, expired, images }: { data: VenturesFi
           <input type="number" min={0} placeholder="min" defaultValue={get("min")} onChange={(e) => set("min", e.target.value)} />
           <input type="number" min={0} placeholder="max" defaultValue={get("max")} onChange={(e) => set("max", e.target.value)} />
         </label>
-        <label>Pull pays ≥
+        <label>Profit chance ≥
           <input type="number" min={0} max={100} placeholder="%" defaultValue={get("pays")} onChange={(e) => set("pays", e.target.value)} />
         </label>
         <label>Bought with

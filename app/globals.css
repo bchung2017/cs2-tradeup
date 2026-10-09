@@ -256,7 +256,7 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-row.is-open { border-color: var(--green-dim); }
 .vx-line {
   display: grid; align-items: center; gap: 12px; padding: 10px 12px; cursor: pointer;
-  grid-template-columns: 24px 120px minmax(220px, 1fr) 84px 84px 72px 150px 110px 118px;
+  grid-template-columns: 24px 120px minmax(220px, 1fr) 84px 84px 84px 230px 110px 118px;
 }
 .vx-line:hover { background: var(--surface-2); }
 .vx-star { background: none; border: none; color: var(--fg-faint); font-size: 16px; padding: 0; cursor: pointer; }
@@ -321,7 +321,7 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-red { background: var(--surface); border: 1px solid var(--surface-line); padding: 10px 12px; }
 .vx-red__head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .vx-red__opts { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.vx-red__opts li { display: grid; grid-template-columns: 24px minmax(220px, 1fr) 90px 80px 70px minmax(200px, 1.2fr); gap: 10px; align-items: center; font-size: 12px; }
+.vx-red__opts li { display: grid; grid-template-columns: 24px minmax(220px, 1fr) 80px 80px 84px minmax(230px, 1.2fr); gap: 10px; align-items: center; font-size: 12px; }
 
 /* the notification */
 .vx-toast {
@@ -366,3 +366,11 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-skin.is-mine .vx-skin__count { background: var(--green); }
 .vx-red__head { align-items: center; }
 .vx-red__mine { display: inline-flex; align-items: center; gap: 12px; }
+.vx-prize { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 10px; }
+.vx-prize__img { flex: none; display: block; border-bottom: 2px solid; background: var(--surface-2); line-height: 0; }
+.vx-prize__img img, .vx-prize__img .vx-skin__none { width: 52px; height: 39px; object-fit: contain; }
+.vx-prize__img img { display: block; }
+.vx-prize__txt { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.vx-prize__txt b { font-size: 15px; font-variant-numeric: tabular-nums; color: #e4ae39; }
+.vx-prize__lbl { font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #e4ae39; }
+.vx-prize__name { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

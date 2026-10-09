@@ -7,14 +7,14 @@
 //   3. what you track, and how its return moved since you starred it
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { LonglistFile, LonglistRow, VenturesFile } from "@/lib/ventures";
+import { prizeKey, type LonglistFile, type LonglistRow, type VenturesFile } from "@/lib/ventures";
 import { useTradeup } from "@/lib/tradeup-context";
-import { abbr, ago, backShort, money, oneIn, pct } from "@/lib/venture-copy";
+import { abbr, ago, backShort, money, pct } from "@/lib/venture-copy";
 import { loadOwned, markSeen, matchLonglist, useNow, useTracked } from "@/lib/venture-store";
 import { useVenturePlans } from "@/lib/venture-fit";
 import VentureRow from "./VentureRow";
 import Ago from "./Ago";
-import SkinStack, { ImagesProvider, type StackItem } from "./SkinStack";
+import SkinStack, { GrandPrize, ImagesProvider, type StackItem } from "./SkinStack";
 
 // a longlist contract as pictures: your red, then the filler (one picture if they're the same skin)
 function redStack(r: LonglistRow): StackItem[] {
@@ -175,10 +175,10 @@ function RedCard({
                 <SkinStack items={redStack(r)} size={38} />
                 + {r.fillerCount}× {r.filler} <span className="dim">({r.fillerWear}) @ {money(r.fillerAsk)} · {r.pools.join(" + ")} · {r.knifeItems} knives</span>
               </span>
-              <span className="vx-num"><b>{money(r.cost)}</b></span>
-              <span className="vx-num"><b className={r.backPerDollar >= 0.9 ? "" : "neg"}>{backShort(r.backPerDollar)}</b></span>
-              <span className="vx-num"><b>{pct(r.pProfit)}</b></span>
-              <span className="dim">{r.top[0] ? `${oneIn(r.top[0].probability)}: ${r.top[0].name} ${money(r.top[0].value)}` : ""}</span>
+              <span className="vx-num"><b>{money(r.cost)}</b><span className="dim">entry</span></span>
+              <span className="vx-num"><b className={r.backPerDollar >= 0.9 ? "" : "neg"}>{backShort(r.backPerDollar)}</b><span className="dim">back per $1</span></span>
+              <span className="vx-num" title="Chance one contract's knife sells for more than the entry cost (not the grand prize odds)"><b>{pct(r.pProfit)}</b><span className="dim">profit chance</span></span>
+              {r.top[0] ? <GrandPrize imageKey={prizeKey(r.top[0].name)} name={r.top[0].name} value={money(r.top[0].value)} probability={r.top[0].probability} rarity="Extraordinary" /> : <span />}
             </li>
           );
         })}
