@@ -7,6 +7,8 @@ import { rarityHex } from "@/lib/display";
 import { abbr, money, oneIn, pct, ventureLine, VERDICT } from "@/lib/venture-copy";
 import { BudgetBar, OutcomeBar } from "./FloatBar";
 import Ago from "./Ago";
+import Handoff from "./Handoff";
+import type { Plan } from "@/lib/venture-fit";
 
 const steamUrl = (skin: string, wear: string) => `https://steamcommunity.com/market/listings/730/${encodeURIComponent(`${skin} (${wear})`)}`;
 const BASIS: Record<string, string> = {
@@ -15,10 +17,11 @@ const BASIS: Record<string, string> = {
   "cash-ask": "lowest third-party ask, float ignored",
 };
 
-export default function VentureDetail({ v, owned }: { v: Venture; owned?: Set<string> }) {
+export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | null }) {
   return (
     <div className="vx-detail">
       <p className="vx-igl"><span className="vx-igl__tag">IGL</span> {ventureLine(v)}</p>
+      <Handoff plan={plan} />
 
       <section>
         <h4 className="hud">Buy · {v.size} inputs · {v.venue === "steam" ? "Steam" : "third-party cash"}</h4>
@@ -26,13 +29,17 @@ export default function VentureDetail({ v, owned }: { v: Venture; owned?: Set<st
           <thead><tr><th>Input</th><th>Collection</th><th>Wear</th><th>Float to buy</th><th className="num">Each</th><th className="num">Listed</th></tr></thead>
           <tbody>
             {v.inputs.map((i) => {
-              const have = owned?.has(`${i.skin}|${i.wear}`);
+              const mine = plan?.slots.filter((s) => s.input === i && s.owned).map((s) => s.owned!) ?? [];
               return (
                 <tr key={`${i.skinId}|${i.wear}`}>
                   <td>
                     <span className="vx-rar" style={{ background: rarityHex(i.rarity) }} />
                     {i.count}× <a href={steamUrl(i.skin, i.wear)} target="_blank" rel="noreferrer">{i.skin}</a>
-                    {have && <span className="vx-own">you own this</span>}
+                    {mine.length > 0 && (
+                      <span className="vx-own" title={mine.map((o) => `${o.name} (${abbr(o.wear)}) ${o.float.toFixed(4)}`).join("\n")}>
+                        {mine.length} yours{mine.some((o) => o.skin.id !== i.skinId) ? " · stand-in" : ""}
+                      </span>
+                    )}
                   </td>
                   <td className="dim">{i.collection.replace(/^The /, "")}</td>
                   <td>{abbr(i.wear)}</td>

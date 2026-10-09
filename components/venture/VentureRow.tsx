@@ -9,21 +9,22 @@ import { rarityHex } from "@/lib/display";
 import { abbr, backShort, money, oneIn, pct, TIER_SHORT, VERDICT } from "@/lib/venture-copy";
 import VentureDetail from "./VentureDetail";
 import Ago from "./Ago";
+import { isReady, type Plan } from "@/lib/venture-fit";
 
 export default function VentureRow({
-  v, tracked, onTrack, owned, isNew, open: openInit = false,
+  v, tracked, onTrack, plan, isNew, open: openInit = false,
 }: {
   v: Venture;
   tracked: boolean;
   onTrack: () => void;
-  owned?: Set<string>;
+  plan?: Plan | null;
   isNew?: boolean;
   open?: boolean;
 }) {
   const [open, setOpen] = useState(openInit);
   const verdict = VERDICT[v.verdict];
   const room = v.float.max - v.float.sum;
-  const mine = owned ? v.inputs.filter((i) => owned.has(`${i.skin}|${i.wear}`)).length : 0;
+  const ready = isReady(v, plan);
   return (
     <li className={`vx-row${open ? " is-open" : ""}`} id={v.key}>
       <div className="vx-line" onClick={() => setOpen((o) => !o)} role="button" tabIndex={0} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setOpen((o) => !o)} aria-expanded={open}>
@@ -49,7 +50,7 @@ export default function VentureRow({
           <div className="vx-cols dim">
             {v.collections.map((c) => c.replace(/^The /, "").replace(/ Collection$/, "")).join(" + ")} · {v.outcomes.length} outcomes
             {isNew && <span className="vx-new">NEW</span>}
-            {mine > 0 && <span className="vx-own">you own {mine === v.inputs.length ? "all" : `${mine} of ${v.inputs.length}`} skin{v.inputs.length > 1 ? "s" : ""}</span>}
+            {ready && <span className="vx-ready" title={`Ready: ${plan!.ownedCount} slot${plan!.ownedCount > 1 ? "s" : ""} from your inventory fit the float budget, and the contract holds at live prices`} aria-label="ready with skins you own">●</span>}
           </div>
         </div>
 
@@ -69,7 +70,7 @@ export default function VentureRow({
           <span className="dim">checked <Ago iso={v.verifiedAt} /></span>
         </div>
       </div>
-      {open && <VentureDetail v={v} owned={owned} />}
+      {open && <VentureDetail v={v} plan={plan} />}
     </li>
   );
 }

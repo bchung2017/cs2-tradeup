@@ -16,6 +16,9 @@ export interface Slot {
   // modal opened from a staged input shows the same numbers the inventory side
   // does. Null/undefined for catalog picks (no synced sources).
   priceSources?: Record<string, number> | null;
+  // Set when a Venture handed this slot over: "owned" is a copy from your
+  // inventory, "buy" is an input still to buy at the contract's float cap.
+  origin?: "owned" | "buy";
 }
 
 export const makeSlots = (n: number): Slot[] =>

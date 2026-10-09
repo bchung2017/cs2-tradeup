@@ -172,6 +172,16 @@ export default function TradeUpConsole() {
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <span className="hud">{String(i + 1).padStart(2, "0")}</span>
+              {/* Handed over from a Venture: your copy, or one still to buy. */}
+              {slot.skin && slot.origin && (
+                <span
+                  className="hud"
+                  title={slot.origin === "owned" ? "from your inventory" : "to buy at or under this float"}
+                  style={{ fontSize: 8, color: slot.origin === "owned" ? "var(--green)" : "var(--cream-dim)" }}
+                >
+                  {slot.origin === "owned" ? "OWNED" : "BUY"}
+                </span>
+              )}
             </div>
 
             {slot.skin ? (

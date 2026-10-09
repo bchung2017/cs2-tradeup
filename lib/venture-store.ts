@@ -7,7 +7,10 @@
 import { useCallback, useEffect, useState } from "react";
 
 export interface Tracked { at: string; back: number; title: string }
-export interface OwnedItem { name: string; wear: string; count: number; statTrak: boolean; rarity: string | null; price: number | null }
+// One copy of an owned skin: its asset id and float (null until a deep sync
+// has read it). Float decides whether the copy fits a contract's float budget.
+export interface OwnedCopy { assetid: string; float: number | null; price: number | null }
+export interface OwnedItem { name: string; wear: string; count: number; statTrak: boolean; rarity: string | null; price: number | null; copies?: OwnedCopy[] }
 export interface Owned { steamid: string; at: string; items: OwnedItem[] }
 
 const K_TRACKED = "ventures:tracked";
@@ -81,10 +84,12 @@ export function parseMarketName(name: string): { skin: string; wear: string; sta
   return { skin, wear: m[2], statTrak, souvenir };
 }
 
+type InvLike = { assetid?: string; name: string | null; rarity: string | null; float?: number | null; price?: number | null };
+
 // Inventory API items → owned list, grouped by skin + wear.
 export function ownedFromInventory(
   steamid: string,
-  items: { name: string | null; rarity: string | null; price?: number | null }[],
+  items: InvLike[],
 ): Owned {
   const byKey = new Map<string, OwnedItem>();
   for (const it of items) {
@@ -92,8 +97,9 @@ export function ownedFromInventory(
     const p = parseMarketName(it.name);
     if (!p || p.souvenir) continue;
     const k = `${p.statTrak ? "ST|" : ""}${p.skin}|${p.wear}`;
-    const cur = byKey.get(k) ?? { name: p.skin, wear: p.wear, count: 0, statTrak: p.statTrak, rarity: it.rarity, price: it.price ?? null };
+    const cur = byKey.get(k) ?? { name: p.skin, wear: p.wear, count: 0, statTrak: p.statTrak, rarity: it.rarity, price: it.price ?? null, copies: [] };
     cur.count++;
+    if (it.assetid) cur.copies!.push({ assetid: it.assetid, float: it.float ?? null, price: it.price ?? null });
     byKey.set(k, cur);
   }
   return { steamid, at: new Date().toISOString(), items: [...byKey.values()] };
@@ -104,7 +110,7 @@ export function ownedFromInventory(
 export async function loadOwned(steamid: string): Promise<Owned | null> {
   const r = await fetch(`/api/inventory/${steamid}`);
   if (!r.ok) return null;
-  const body = (await r.json()) as { items?: { name: string | null; rarity: string | null; price?: number | null }[] };
+  const body = (await r.json()) as { items?: InvLike[] };
   const owned = ownedFromInventory(steamid, body.items ?? []);
   setOwned(owned);
   return owned;

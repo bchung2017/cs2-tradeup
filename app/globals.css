@@ -280,7 +280,11 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .tone-bad { color: var(--loss); }
 .tone-dim { color: var(--fg-dim); }
 .vx-new { color: var(--void); background: var(--green); font-weight: 700; font-size: 9px; padding: 0 4px; letter-spacing: 0.1em; }
-.vx-own { color: var(--amber); font-size: 10px; border: 1px solid var(--amber); padding: 0 4px; margin-left: 6px; }
+.vx-own { color: var(--green); font-size: 10px; border: 1px solid var(--green-dim); padding: 0 4px; margin-left: 6px; }
+.vx-ready { color: var(--green); margin-left: 8px; font-size: 12px; text-shadow: 0 0 6px var(--green); cursor: help; }
+.vx-handoff { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vx-handoff button { border: 1px solid var(--surface-line); background: var(--surface-2); color: var(--fg); padding: 6px 10px; cursor: pointer; }
+.vx-handoff button:disabled { opacity: 0.45; cursor: not-allowed; }
 .dim { color: var(--fg-faint); }
 .mono { font-variant-numeric: tabular-nums; }
 

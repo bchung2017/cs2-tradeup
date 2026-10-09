@@ -6,7 +6,8 @@ import { useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ExpiredFile, Venture, VenturesFile } from "@/lib/ventures";
 import { ago, TIER_SHORT } from "@/lib/venture-copy";
-import { useNow, useOwned, useTracked } from "@/lib/venture-store";
+import { useNow, useTracked } from "@/lib/venture-store";
+import { useVenturePlans } from "@/lib/venture-fit";
 import VentureRow from "./VentureRow";
 import Ago from "./Ago";
 
@@ -42,8 +43,7 @@ export default function MarketList({ data, expired }: { data: VenturesFile; expi
   const router = useRouter();
   const pathname = usePathname();
   const { tracked, toggle } = useTracked();
-  const owned = useOwned();
-  const ownedSet = useMemo(() => new Set((owned?.items ?? []).filter((i) => !i.statTrak).map((i) => `${i.name}|${i.wear}`)), [owned]);
+  const { plans, owned } = useVenturePlans(data.ventures);
 
   const get = (k: string, d = "") => params.get(k) ?? d;
   const set = (k: string, v: string) => {
@@ -82,12 +82,12 @@ export default function MarketList({ data, expired }: { data: VenturesFile; expi
         if (venue && v.venue !== venue) return false;
         if (knifeOnly && v.outputTier !== "Extraordinary") return false;
         if (doppler && !v.outcomes.some((o) => /Doppler/.test(o.name))) return false;
-        if (mine && !v.inputs.some((i) => ownedSet.has(`${i.skin}|${i.wear}`))) return false;
+        if (mine && !plans.get(v.key)?.ownedCount) return false;
         if (freshH && (!v.verifiedAt || now - Date.parse(v.verifiedAt) > freshH * 3600e3)) return false;
         return true;
       })
       .sort(SORTS[sort].fn);
-  }, [data, q, tier, verdict, minCost, maxCost, minPays, venue, knifeOnly, doppler, mine, freshH, sort, ownedSet, now]);
+  }, [data, q, tier, verdict, minCost, maxCost, minPays, venue, knifeOnly, doppler, mine, freshH, sort, plans, now]);
 
   if (!data.ventures.length) {
     return <p className="vx-empty">No run yet. The weekly sync writes public/data/ventures.json; run <code>npx tsx scripts/igl9000-ventures.ts</code> to make one now.</p>;
@@ -157,7 +157,7 @@ export default function MarketList({ data, expired }: { data: VenturesFile; expi
             v={v}
             tracked={!!tracked[v.key]}
             onTrack={() => toggle(v.key, v.backPerDollar, v.inputs.map((i) => `${i.count}× ${i.skin}`).join(" + "))}
-            owned={ownedSet}
+            plan={plans.get(v.key)}
             isNew={now - Date.parse(v.firstSeenAt) < NEW_MS}
           />
         ))}

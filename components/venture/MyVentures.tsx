@@ -10,7 +10,8 @@ import Link from "next/link";
 import type { LonglistFile, LonglistRow, VenturesFile } from "@/lib/ventures";
 import { useTradeup } from "@/lib/tradeup-context";
 import { abbr, ago, backShort, money, oneIn, pct } from "@/lib/venture-copy";
-import { loadOwned, markSeen, matchLonglist, useNow, useOwned, useTracked } from "@/lib/venture-store";
+import { loadOwned, markSeen, matchLonglist, useNow, useTracked } from "@/lib/venture-store";
+import { useVenturePlans } from "@/lib/venture-fit";
 import VentureRow from "./VentureRow";
 import Ago from "./Ago";
 
@@ -18,7 +19,7 @@ const DEFAULT_STEAMID = "76561198059693930";
 
 export default function MyVentures({ market }: { market: VenturesFile }) {
   const { steamid: railSteamid } = useTradeup();
-  const owned = useOwned();
+  const { plans, owned } = useVenturePlans(market.ventures);
   const { tracked, toggle } = useTracked();
   const [longlist, setLonglist] = useState<LonglistFile | null>(null);
   const [input, setInput] = useState("");
@@ -47,8 +48,8 @@ export default function MyVentures({ market }: { market: VenturesFile }) {
   }
 
   const matches = useMemo(() => matchLonglist(owned, longlist?.rows ?? []), [owned, longlist]);
-  const ownedSet = useMemo(() => new Set((owned?.items ?? []).filter((i) => !i.statTrak).map((i) => `${i.name}|${i.wear}`)), [owned]);
-  const usingMine = useMemo(() => market.ventures.filter((v) => v.inputs.some((i) => ownedSet.has(`${i.skin}|${i.wear}`))), [market, ownedSet]);
+  // a copy you own fits a slot (same skin or a stand-in) inside the float budget
+  const usingMine = useMemo(() => market.ventures.filter((v) => plans.get(v.key)?.ownedCount), [market, plans]);
 
   // visiting this tab clears the nav badge
   useEffect(() => {
@@ -84,18 +85,15 @@ export default function MyVentures({ market }: { market: VenturesFile }) {
       <section className="vx-section">
         <h3>Market contracts using your skins</h3>
         {usingMine.length === 0 ? (
-          <p className="vx-empty">{owned ? "None of the current market contracts use a skin you own." : "Load an inventory first."}</p>
+          <p className="vx-empty">{owned ? "None of the current market contracts has a slot a skin you own can fill inside its float budget." : "Load an inventory first."}</p>
         ) : (
           <ul className="vx-list">
             {usingMine.map((v) => {
-              const rest = v.inputs.reduce((a, i) => {
-                const have = owned?.items.find((o) => !o.statTrak && o.name === i.skin && o.wear === i.wear)?.count ?? 0;
-                return a + Math.max(0, i.count - have) * (i.priceEach ?? 0);
-              }, 0);
+              const plan = plans.get(v.key)!;
               return (
                 <div key={v.key}>
-                  <p className="vx-note">Buy the rest for {money(rest)} (of {money(v.cost)}).</p>
-                  <VentureRow v={v} tracked={!!tracked[v.key]} onTrack={() => toggle(v.key, v.backPerDollar, v.inputs.map((i) => `${i.count}× ${i.skin}`).join(" + "))} owned={ownedSet} />
+                  <p className="vx-note">Buy the rest for {money(plan.rest)} (of {money(v.cost)}).</p>
+                  <VentureRow v={v} tracked={!!tracked[v.key]} onTrack={() => toggle(v.key, v.backPerDollar, v.inputs.map((i) => `${i.count}× ${i.skin}`).join(" + "))} plan={plan} />
                 </div>
               );
             })}
