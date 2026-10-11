@@ -252,7 +252,7 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-row.is-open { border-color: var(--green-dim); }
 .vx-line {
   display: grid; align-items: center; gap: 12px; padding: 10px 12px; cursor: pointer;
-  grid-template-columns: 24px 110px minmax(220px, 1fr) 80px 80px 80px 220px 100px 110px;
+  grid-template-columns: 24px 110px minmax(220px, 1fr) 80px 80px 80px 230px 100px 110px;
 }
 .vx-line:hover { background: var(--surface-2); }
 .vx-star { background: none; border: none; color: var(--fg-faint); font-size: 16px; padding: 0; cursor: pointer; }
@@ -452,3 +452,38 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-roll.is-top .vx-roll__img { border-color: #e4ae39; box-shadow: 0 0 8px rgba(228, 174, 57, 0.45); }
 .vx-roll.is-top b { color: #e4ae39; font-size: 13px; }
 .vx-rolls__name { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Venture row results: outcome donut + the four most valuable outcomes, and
+   the card a hovered (or tapped) slice opens */
+.vx-out { position: relative; display: flex; align-items: center; gap: 8px; }
+.vx-pie { flex: none; display: block; overflow: visible; }
+.vx-top4 { display: grid; grid-template-columns: repeat(2, 56px); gap: 4px; }
+.vx-top4__cell {
+  margin: 0; display: flex; flex-direction: column; align-items: center; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--surface-line); border-bottom: 2px solid;
+  box-shadow: inset 3px 0 0 var(--slice); padding: 1px 1px 2px 4px;
+}
+.vx-top4__cell img, .vx-top4__cell .vx-skin__none { width: 48px; height: 36px; object-fit: contain; display: block; }
+.vx-top4__cell figcaption { font-size: 10px; color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vx-top4__cell.is-on { border-color: var(--slice); box-shadow: inset 3px 0 0 var(--slice), 0 0 8px var(--slice); }
+.vx-outcard {
+  position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: 220px; pointer-events: none;
+  background: var(--surface); border: 1px solid; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.85);
+  padding: 8px 10px; font-size: 11px; color: var(--fg); cursor: default;
+  animation: vx-in 140ms ease-out;
+}
+.vx-outcard__img { display: flex; justify-content: center; background: var(--surface-2); border-bottom: 2px solid; margin-bottom: 6px; }
+.vx-outcard__img img, .vx-outcard__img .vx-skin__none { width: 96px; height: 72px; object-fit: contain; display: block; }
+.vx-outcard__name { font-size: 12px; margin-bottom: 4px; }
+.vx-outcard__dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; }
+.vx-outcard dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 0; }
+.vx-outcard dt { color: var(--fg-dim); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.vx-outcard dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 1100px) {
+  .vx-out { justify-content: flex-start; }
+}
+@media (max-width: 420px) {
+  .vx-pie { width: 76px; height: 76px; }
+  .vx-top4 { grid-template-columns: repeat(4, 50px); }
+  .vx-top4__cell img, .vx-top4__cell .vx-skin__none { width: 42px; height: 32px; }
+}

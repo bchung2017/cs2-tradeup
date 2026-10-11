@@ -1,16 +1,17 @@
 "use client";
 
 // One contract, collapsed to a line you can scan: what goes in, what it costs,
-// how much comes back, the jackpot and its odds, the float budget, freshness and
+// how much comes back, every outcome's odds as a donut with the four best, the float budget, freshness and
 // the verdict. Click to open the full recipe.
 import { useState } from "react";
-import { topOutcomes, type Venture } from "@/lib/ventures";
+import type { Venture } from "@/lib/ventures";
 import { rarityHex } from "@/lib/display";
 import { abbr, backShort, money, pct, TIER_SHORT, VERDICT } from "@/lib/venture-copy";
 import VentureDetail from "./VentureDetail";
 import Ago from "./Ago";
 import { isReady, type Plan } from "@/lib/venture-fit";
-import { BestRolls, SlotStrip, stackPlan } from "./SkinStack";
+import { SlotStrip, stackPlan } from "./SkinStack";
+import OutcomePie from "./OutcomePie";
 
 export default function VentureRow({
   v, tracked, onTrack, plan, isNew, open: openInit = false,
@@ -60,7 +61,7 @@ export default function VentureRow({
         <div className="vx-num vx-num--back"><b className={v.backPerDollar >= 1 ? "pos" : v.backPerDollar >= 0.85 ? "" : "neg"}>{backShort(v.backPerDollar)}</b><span className="dim">back per $1</span></div>
         <div className="vx-num vx-num--pays" title="Chance the outcome sells for more than the entry (not the grand prize odds)"><b>{pct(v.pProfit)}</b><span className="dim">profit chance</span></div>
         <div className="vx-jackpot">
-          <BestRolls money={money} rolls={topOutcomes(v).map((o) => ({ imageKey: o.skinId, name: o.name, value: o.value, probability: o.probability, rarity: o.rarity }))} />
+          <OutcomePie v={v} />
         </div>
         <div className="vx-room" title={`float budget: ${v.float.sum.toFixed(3)} of ${v.float.max.toFixed(3)}`}>
           <div className="vx-room__bar"><div style={{ width: `${Math.min(100, (v.float.sum / v.float.max) * 100)}%`, background: room < 0.02 ? "var(--amber)" : "var(--green-dim)" }} /></div>

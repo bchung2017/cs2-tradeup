@@ -1,13 +1,12 @@
 import { Suspense } from "react";
 import MarketList from "@/components/venture/MarketList";
 import { imagesById, loadExpired, loadVentures } from "@/lib/ventures-data";
-import { topOutcomes } from "@/lib/ventures";
 
 // Reads the committed data files; a new sync commit redeploys the site.
 export default function MarketVenturesPage() {
   const data = loadVentures();
   const expired = loadExpired();
-  const images = imagesById(data.ventures.flatMap((v) => [...v.inputs.map((i) => i.skinId), ...topOutcomes(v).map((o) => o.skinId)]));
+  const images = imagesById(data.ventures.flatMap((v) => [...v.inputs.map((i) => i.skinId), ...v.outcomes.map((o) => o.skinId)]));
   return (
     // useSearchParams (filters live in the URL) needs a Suspense boundary
     <Suspense fallback={<p className="vx-empty">Loading contracts…</p>}>

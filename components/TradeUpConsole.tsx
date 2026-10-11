@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import SkinPicker from "@/components/SkinPicker";
 import PriceModal, { marketName } from "@/components/PriceModal";
 import { oddsString, rarityColor, rarityHex, signedUsd, usd } from "@/lib/display";
+import { arcPath, PIE_COLORS, roiColor } from "@/lib/pie";
 import { numCompare } from "@/lib/util";
 import { floatToWear } from "@/lib/tradeup";
 import { makeSlots, useTradeup } from "@/lib/tradeup-context";
@@ -602,15 +603,6 @@ function Outcomes({
 // One outcome rendered as a picture card. Carries every field the old table row
 // held: weapon + name, MOST-LIKELY flag, wear/float, hit %, odds, price, the
 // profit/loss if you land it, and ROI. The color swatch ties back to the donut.
-// Map an outcome's ROI to a red→yellow→green spectrum, yellow at break-even.
-// −100% (wipeout) → red, 0% → yellow, +100% or better → green; clamped past ±100%.
-function roiColor(roi: number | null): string {
-  if (roi == null) return "var(--cream-dim)";
-  const t = Math.max(-1, Math.min(1, roi / 100));
-  const hue = 60 + t * 60; // 0 red · 60 yellow · 120 green
-  return `hsl(${Math.round(hue)}, 85%, 58%)`;
-}
-
 function OutcomeCard({
   o,
   idx,
@@ -893,25 +885,6 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
       <div style={{ fontSize: 20, marginTop: 2, color: color ?? "var(--cream)" }}>{value}</div>
     </div>
   );
-}
-
-// Distinct hues for pie slices (output skins share one rarity, so we can't color
-// by rarity — use a fixed high-contrast palette instead).
-const PIE_COLORS = [
-  "#4b69ff", "#eb4b4b", "#2ecc71", "#e4ae39", "#d32ce6", "#1abc9c",
-  "#8847ff", "#5e98d9", "#f39c12", "#16a085", "#e74c3c", "#9b59b6",
-];
-
-function polar(cx: number, cy: number, r: number, angleDeg: number): [number, number] {
-  const a = ((angleDeg - 90) * Math.PI) / 180;
-  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-}
-
-function arcPath(cx: number, cy: number, r: number, startDeg: number, endDeg: number): string {
-  const [sx, sy] = polar(cx, cy, r, endDeg);
-  const [ex, ey] = polar(cx, cy, r, startDeg);
-  const large = endDeg - startDeg <= 180 ? 0 : 1;
-  return `M ${cx} ${cy} L ${sx} ${sy} A ${r} ${r} 0 ${large} 0 ${ex} ${ey} Z`;
 }
 
 // Below-the-fold visualizers for a computed contract: an outcome-probability
