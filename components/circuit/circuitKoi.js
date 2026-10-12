@@ -168,7 +168,14 @@ window.Circuit2D = (function () {
     // scales the baked CACHE_BASE_A toward this frame's baseA so intensity/surge
     // still modulate brightness without re-stroking every trace.
     ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Clear first: if the browser discarded the cache's pixels (it can, for a
+    // backgrounded tab), blitting a blank cache with nothing underneath let the
+    // animated overlays pile up frame after frame into solid white traces.
+    ctx.fillStyle = "#020507";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (cctx.isContextLost && cctx.isContextLost()) buildCache();
     ctx.drawImage(cache, 0, 0);
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.lineWidth = 1;
@@ -884,6 +891,10 @@ window.Circuit2D = (function () {
   resize();
   window.addEventListener("resize", resize);
   teardown.push(() => window.removeEventListener("resize", resize));
+  // back from the background: the baked trace layer may have been discarded
+  const onVisible = () => { if (!document.hidden) C2D.resize(); };
+  document.addEventListener("visibilitychange", onVisible);
+  teardown.push(() => document.removeEventListener("visibilitychange", onVisible));
 
   const start = performance.now();
   function frame() {

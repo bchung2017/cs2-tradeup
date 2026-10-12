@@ -167,7 +167,24 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
     }
   }
 
+  // Android may drop a canvas's pixels while the app is in the background (the
+  // context is "lost", then restored blank). A blank baked layer, with nothing
+  // clearing the screen, let every frame's electrons and sheen pile up into
+  // solid white traces over black. So: clear each frame, and rebake whenever a
+  // layer reports lost, doesn't match the screen, or the page comes back.
+  const isLost = (c: HTMLCanvasElement) =>
+    (c.getContext("2d") as (CanvasRenderingContext2D & { isContextLost?: () => boolean }) | null)?.isContextLost?.() === true;
+  function bakedOk() {
+    return base.width === canvas.width && base.height === canvas.height && canvas.width > 1 && !isLost(base) && !isLost(glow) && !isLost(lit);
+  }
+
   function draw(t: number, still = false) {
+    if (!bakedOk()) layout();
+    ctx!.setTransform(1, 0, 0, 1, 0, 0);
+    ctx!.globalAlpha = 1;
+    ctx!.globalCompositeOperation = "source-over";
+    ctx!.fillStyle = BG;
+    ctx!.fillRect(0, 0, canvas.width, canvas.height);
     ctx!.drawImage(base, 0, 0);
     ctx!.globalAlpha = still ? 0.8 : 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(t * 0.6));
     ctx!.drawImage(glow, 0, 0);
@@ -202,7 +219,16 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
   }
   function onVisibility() {
     cancelAnimationFrame(raf);
-    if (!document.hidden && !reduced && !stopped) raf = requestAnimationFrame(frame);
+    if (document.hidden || stopped) return;
+    // coming back: the browser may have discarded the baked layers meanwhile
+    layout();
+    draw(performance.now() / 1000, reduced);
+    if (!reduced) raf = requestAnimationFrame(frame);
+  }
+  function onRestored() {
+    if (stopped) return;
+    layout();
+    draw(performance.now() / 1000, reduced);
   }
 
   layout();
@@ -210,6 +236,7 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
   if (!reduced) raf = requestAnimationFrame(frame);
   addEventListener("resize", onResize);
   document.addEventListener("visibilitychange", onVisibility);
+  for (const c of [canvas, base, glow, lit]) c.addEventListener("contextrestored", onRestored);
 
   return {
     setLive(intensity: number, surge: boolean) {
@@ -222,6 +249,7 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
       clearTimeout(resizeTimer);
       removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisibility);
+      for (const c of [canvas, base, glow, lit]) c.removeEventListener("contextrestored", onRestored);
     },
   };
 }
