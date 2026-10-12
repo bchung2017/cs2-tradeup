@@ -22,6 +22,8 @@ import { WEAR_RANGES, type PriceTable, type Skin, type Wear } from "../../../typ
 import { boolParam, intParam, intParamOpt, strParam } from "../http";
 import type { AdminRequest, AdminResult } from "../types";
 import { BULK_PROVIDERS, fetchBulk, fetchSteamItem, type BulkProvider } from "./price-sources";
+import { FEEDS, loadFeed } from "../../../lib/third-party-feeds";
+import { applyPhasePrices } from "../../../lib/phase-prices";
 
 const DATA_DIR = join(process.cwd(), "public", "data");
 const PRICES_FILE = join(DATA_DIR, "prices.json");
@@ -187,6 +189,19 @@ export async function syncMarketAverage(opts: MarketAvgOptions): Promise<AdminRe
     updated++;
   }
 
+  // Doppler phases: Steam/Skinport price a Doppler under one name, so every phase
+  // just got the same price. Overwrite each phase with its own (Buff163 +
+  // CSFloat per-phase asks). A feed failure leaves the name-level price.
+  let phases: { updated: number; missing: number } | { error: string } = { updated: 0, missing: 0 };
+  if (!opts.tag || opts.tag === "norm" || opts.tag === "st") {
+    try {
+      phases = applyPhasePrices(prices, skins, FEEDS.map(loadFeed), stamp);
+      updated += phases.updated;
+    } catch (e) {
+      phases = { error: (e as Error).message };
+    }
+  }
+
   // Priceable universe = keys present on ≥1 feed = everything we attempted that
   // wasn't unmatched (matched now + already-priced skips). Only meaningful on a
   // full run; a tag/wear-scoped run sees only a slice, so don't overwrite it.
@@ -213,6 +228,7 @@ export async function syncMarketAverage(opts: MarketAvgOptions): Promise<AdminRe
       unmatched, // keys on NO feed — structurally unpriceable
       skipped,
       sourceHits, // how many items each provider contributed to
+      phases, // Doppler phase entries priced per phase
       dryRun: opts.dryRun,
       forced: opts.force,
       coverage: {

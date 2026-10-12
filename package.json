@@ -14,6 +14,7 @@
     "igl9000-knife": "tsx scripts/igl9000-knife.ts",
     "igl9000-knife-longlist": "tsx scripts/igl9000-knife-longlist.ts",
     "sync-prices": "tsx scripts/sync-prices.ts",
+    "sync-phase-prices": "tsx scripts/sync-phase-prices.ts",
     "admin": "tsx scripts/admin-server.ts",
     "typecheck": "tsc --noEmit"
   },

@@ -69,6 +69,13 @@ const MARKETPLACES: Marketplace[] = [
     url: (n) => `https://csfloat.com/search?market_hash_name=${encodeURIComponent(n)}`,
   },
   {
+    // per-phase Doppler prices come from Buff163 + CSFloat (lib/phase-prices.ts)
+    key: "buff163",
+    label: "Buff163",
+    color: "#e4ae39",
+    url: (n) => `https://buff.163.com/market/csgo#search=${encodeURIComponent(stripTags(n))}`,
+  },
+  {
     key: "dmarket",
     label: "DMarket",
     color: "#27c281",
