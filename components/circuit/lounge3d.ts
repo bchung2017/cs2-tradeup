@@ -6,11 +6,14 @@
 //   koi     the same school (koi2d.js) on their own layer above the floor
 //   water   a rippling surface above the koi, phosphor sheen at grazing angles
 //   basin   the pond's walls, edged in glowing green, rising as the camera tilts
-// Stage 1 of the Lounge; the rock face, waterfall, bonsai, patio and ramp come
-// next and attach to `scenery`.
+//   scenery     rock face, spring, waterfall, bonsai, patio and ramp
+//               (loungeScenery.ts)
+// Building it is split into small steps with a frame between each
+// (createLounge reports progress for the loading bar), so the page never
+// freezes, and everything is compiled and on the GPU before the camera moves.
 import * as THREE from "three";
 import { initCircuitLite } from "./circuitLite";
-import { createKoiSchool } from "./koi2d";
+import { createKoiSchool, makeKoiTexturesAsync } from "./koi2d";
 import { buildScenery, type Scenery } from "./loungeScenery";
 
 const BG = 0x020507;
@@ -21,6 +24,11 @@ const WATER_Y = 1.1; // water surface height above the floor
 const KOI_Y = 0.55; // the koi swim between the floor and the surface
 const RIM = 1.6; // basin wall height
 const TRANSITION_S = 1.8; // seconds, top-down ↔ three-quarter
+const KOI_RES = 0.5; // the koi layer's pixels per screen pixel
+const FLOOR_RES = 0.75; // the floor's
+
+// wait for the browser to paint (so the loading bar moves) before going on
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
 export interface Lounge {
   setInLounge(on: boolean): void;
@@ -30,7 +38,12 @@ export interface Lounge {
 const smooth = (u: number) => u * u * (3 - 2 * u);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-export function initLounge(canvas: HTMLCanvasElement, onIdle: (idle: boolean) => void): Lounge {
+export async function createLounge(
+  canvas: HTMLCanvasElement,
+  onIdle: (idle: boolean) => void,
+  onProgress: (done: number) => void,
+): Promise<Lounge> {
+  const step = (done: number) => { onProgress(done); return nextFrame(); };
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
   renderer.setClearColor(BG, 1);
@@ -43,7 +56,9 @@ export function initLounge(canvas: HTMLCanvasElement, onIdle: (idle: boolean) =>
 
   // ── floor: the live circuit ──────────────────────────────────────────────
   const floorCanvas = document.createElement("canvas");
-  const floorRenderer = initCircuitLite(floorCanvas);
+  const floorRenderer = initCircuitLite(floorCanvas, { scale: FLOOR_RES });
+  floorRenderer.setPaused(true); // runs only while the Lounge is showing
+  await step(0.2);
   const floorTex = new THREE.CanvasTexture(floorCanvas);
   floorTex.colorSpace = THREE.SRGBColorSpace;
   floorTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
@@ -54,7 +69,8 @@ export function initLounge(canvas: HTMLCanvasElement, onIdle: (idle: boolean) =>
   // ── koi: the same school, on a transparent layer at depth ────────────────
   const koiCanvas = document.createElement("canvas");
   const koiCtx = koiCanvas.getContext("2d")!;
-  const school = createKoiSchool();
+  // the koi's smoke textures are the slowest thing to make: one per frame
+  const school = createKoiSchool(await makeKoiTexturesAsync((d) => step(0.2 + 0.35 * d)));
   const koiTex = new THREE.CanvasTexture(koiCanvas);
   koiTex.colorSpace = THREE.SRGBColorSpace;
   const koi = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: koiTex, transparent: true, depthWrite: false }));
@@ -123,7 +139,6 @@ export function initLounge(canvas: HTMLCanvasElement, onIdle: (idle: boolean) =>
   let scenery: Scenery | null = null;
 
   let W = DEPTH; // floor width in world units, set from the screen's aspect
-  let warmed = false;
   function buildBasin() {
     for (const c of [...basin.children]) {
       basin.remove(c);
@@ -156,7 +171,11 @@ export function initLounge(canvas: HTMLCanvasElement, onIdle: (idle: boolean) =>
     basin.add(slabEdges);
   }
 
-  function resize() {
+  function onResize() {
+    layout();
+    rebuild(innerHeight);
+  }
+  function layout() {
     const w = innerWidth, h = innerHeight;
     renderer.setSize(w, h, false);
     canvas.style.width = `${w}px`;
@@ -165,12 +184,11 @@ export function initLounge(canvas: HTMLCanvasElement, onIdle: (idle: boolean) =>
     camera.updateProjectionMatrix();
     W = DEPTH * (w / h);
     for (const m of [floor, koi, water]) m.scale.set(W, DEPTH, 1);
-    koiCanvas.width = w;
-    koiCanvas.height = h;
+    koiCanvas.width = Math.round(w * KOI_RES);
+    koiCanvas.height = Math.round(h * KOI_RES);
     school.setSize(w, h);
-    // the fish enter from off-screen: swim them ~20 s ahead so the pond isn't
-    // empty on arrival (no drawing, just the motion)
-    if (!warmed) { for (let i = 0; i <= 400; i++) school.advance(i * 0.05); warmed = true; }
+  }
+  function rebuild(h: number) {
     buildBasin();
     if (scenery) { scene.remove(scenery.group); scenery.dispose(); }
     scenery = buildScenery(W, DEPTH, RIM, WATER_Y);
@@ -287,7 +305,9 @@ export function initLounge(canvas: HTMLCanvasElement, onIdle: (idle: boolean) =>
 
     // the floor redraws itself at 20 fps; upload it about that often
     if (now - lastFloor > 45) { floorTex.needsUpdate = true; lastFloor = now; }
+    koiCtx.setTransform(1, 0, 0, 1, 0, 0);
     koiCtx.clearRect(0, 0, koiCanvas.width, koiCanvas.height);
+    koiCtx.setTransform(KOI_RES, 0, 0, KOI_RES, 0, 0); // the school swims in screen pixels
     school.frame(koiCtx, time);
     koiTex.needsUpdate = true;
 
@@ -331,8 +351,37 @@ export function initLounge(canvas: HTMLCanvasElement, onIdle: (idle: boolean) =>
     else if (goal === 1 || u > 0) start();
   }
 
-  resize();
-  addEventListener("resize", resize);
+  // ── staged build ─────────────────────────────────────────────────────────
+  layout();
+  // the fish enter from off-screen: swim them ~20 s ahead, in chunks, so the
+  // pond isn't empty on arrival (motion only, no drawing)
+  for (let k = 0; k < 16; k++) {
+    for (let i = 0; i < 25; i++) school.advance((k * 25 + i) * 0.05);
+    await step(0.55 + 0.0075 * (k + 1));
+  }
+  rebuild(innerHeight); // basin, scenery (built and baked), camera framing
+  await step(0.8);
+  // compile every shader up front, with the scene fully risen so nothing is
+  // skipped (parallel compile where the browser supports it)
+  scenery!.update(0, 1);
+  basin.visible = true;
+  basin.scale.y = 1;
+  waterMat.uniforms.uReveal.value = 1;
+  placeCamera(1, 0);
+  await renderer.compileAsync(scene, camera);
+  await step(0.92);
+  // one hidden draw of the full scene: uploads textures and geometry to the
+  // GPU now rather than on the first frame of the move
+  canvas.style.opacity = "0";
+  floorTex.needsUpdate = true;
+  koiTex.needsUpdate = true;
+  renderer.render(scene, camera);
+  scenery!.update(0, 0);
+  basin.visible = false;
+  waterMat.uniforms.uReveal.value = 0;
+  await step(1);
+
+  addEventListener("resize", onResize);
   document.addEventListener("visibilitychange", onVisibility);
 
   return {
@@ -344,7 +393,7 @@ export function initLounge(canvas: HTMLCanvasElement, onIdle: (idle: boolean) =>
       stopped = true;
       if (covered) dispatchEvent(new CustomEvent("lounge:cover", { detail: false }));
       cancelAnimationFrame(raf);
-      removeEventListener("resize", resize);
+      removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisibility);
       floorRenderer.destroy();
       scenery?.dispose();

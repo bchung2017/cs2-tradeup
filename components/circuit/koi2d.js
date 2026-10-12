@@ -2,7 +2,83 @@
 // the Lounge's 3D pond (lounge3d.ts). Moved out of circuitKoi.js unchanged:
 // the school swims in pixel space over a W x H field and draws into whatever
 // 2D context it's handed each frame.
-export function createKoiSchool() {
+
+const KSCHEMES = [
+  { base:[40,12,4],   mid:[180,80,12],   hot:[255,200,60]  },
+  { base:[20,2,4],    mid:[160,8,12],    hot:[255,110,80]  },
+  { base:[2,28,8],    mid:[12,170,40],   hot:[120,255,160] },
+  { base:[2,4,38],    mid:[20,40,170],   hot:[120,160,255] },
+  { base:[28,16,2],   mid:[180,120,20],  hot:[255,220,120] },
+  { base:[24,4,28],   mid:[120,30,140],  hot:[230,140,255] },
+  { base:[60,62,68],  mid:[170,174,180], hot:[255,255,255] },   // white/platinum
+  { base:[4,5,7],     mid:[34,36,42],    hot:[150,160,175] },   // black/gunmetal
+];
+// A scheme's smoke texture, filled band by band: `bands` yields after each
+// band of rows (the async maker waits a frame there), the plain call runs it
+// straight through.
+function makeSmokeTexture(sc, size) {
+  const it = smokeBands(sc, size, 1);
+  let r = it.next();
+  while (!r.done) r = it.next();
+  return r.value;
+}
+function* smokeBands(sc, size, bands) {
+  const off = document.createElement("canvas"); off.width = off.height = size;
+  const c = off.getContext("2d");
+  const img = c.createImageData(size, size);
+  function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
+  function smooth(t) { return t * t * (3 - 2 * t); }
+  function noise(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+    const a = hash(xi, yi), b = hash(xi + 1, yi), cc = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+    const u = smooth(xf), v = smooth(yf);
+    return (a * (1 - u) + b * u) * (1 - v) + (cc * (1 - u) + d * u) * v;
+  }
+  function fbm(x, y) { let v = 0, a = 0.5, f = 1; for (let i = 0; i < 4; i++) { v += noise(x * f, y * f) * a; a *= 0.55; f *= 2.1; } return v; }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function mix3(c1, c2, c3, t) {
+    if (t < 0.55) { const k = t / 0.55; return [lerp(c1[0], c2[0], k), lerp(c1[1], c2[1], k), lerp(c1[2], c2[2], k)]; }
+    const k = (t - 0.55) / 0.45; return [lerp(c2[0], c3[0], k), lerp(c2[1], c3[1], k), lerp(c2[2], c3[2], k)];
+  }
+  const data = img.data;
+  const per = Math.ceil(size / bands);
+  for (let y = 0; y < size; y++) {
+    if (y > 0 && y % per === 0) yield;
+    for (let x = 0; x < size; x++) {
+    const wx = fbm(x * 0.012 + 13.7, y * 0.012 + 9.1);
+    const wy = fbm(x * 0.012 - 4.3, y * 0.012 + 22.5);
+    const v = fbm(x * 0.018 + wx * 3.0, y * 0.018 + wy * 3.0);
+    const t = Math.min(1, Math.max(0, (v - 0.30) / 0.55));
+    const col = mix3(sc.base, sc.mid, sc.hot, t);
+    const i = (y * size + x) * 4;
+    data[i] = col[0] | 0; data[i + 1] = col[1] | 0; data[i + 2] = col[2] | 0; data[i + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  return off;
+}
+const KTEX_SIZE = 256;
+
+// Every scheme's smoke texture, one per call to `step` (pass a function that
+// waits, e.g. for the next frame), so making them never blocks for long.
+export async function makeKoiTexturesAsync(step) {
+  const out = [];
+  const BANDS = 4;
+  for (const s of KSCHEMES) {
+    const it = smokeBands(s, KTEX_SIZE, BANDS);
+    let r = it.next(), band = 0;
+    while (!r.done) {
+      band++;
+      await step((out.length + band / BANDS) / KSCHEMES.length);
+      r = it.next();
+    }
+    out.push({ scheme: s, tex: r.value });
+  }
+  await step(1);
+  return out;
+}
+
+export function createKoiSchool(textures) {
   let ctx = null;
   let W = 0, H = 0;
 
@@ -13,16 +89,6 @@ export function createKoiSchool() {
   const KOI = { TWO_PI: Math.PI * 2, SEG: 20, CRAWL: 7, DRIFT: 64, MAX_OFF: Math.PI / 18, TURN_OMEGA: 0.09, get COUNT() { return window.__IS_TOUCH ? 2 : 4; }, SHINE: 1.0 };
   const krand = (a, b) => a + Math.random() * (b - a);
 
-  const KSCHEMES = [
-    { base:[40,12,4],   mid:[180,80,12],   hot:[255,200,60]  },
-    { base:[20,2,4],    mid:[160,8,12],    hot:[255,110,80]  },
-    { base:[2,28,8],    mid:[12,170,40],   hot:[120,255,160] },
-    { base:[2,4,38],    mid:[20,40,170],   hot:[120,160,255] },
-    { base:[28,16,2],   mid:[180,120,20],  hot:[255,220,120] },
-    { base:[24,4,28],   mid:[120,30,140],  hot:[230,140,255] },
-    { base:[60,62,68],  mid:[170,174,180], hot:[255,255,255] },   // white/platinum
-    { base:[4,5,7],     mid:[34,36,42],    hot:[150,160,175] },   // black/gunmetal
-  ];
   const krgb = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
   // weighted scheme pick (indices into KSCHEMES):
   // 0 sunset, 1 crimson, 2 jade, 3 sapphire, 4 amber, 5 plum, 6 white, 7 black
@@ -42,39 +108,9 @@ export function createKoiSchool() {
     for (const k of KWEIGHTS) { if (r < k.w) return ktextures[k.i]; r -= k.w; }
     return ktextures[KWEIGHTS[0].i];
   }
-  function makeSmokeTexture(sc, size) {
-    const off = document.createElement("canvas"); off.width = off.height = size;
-    const c = off.getContext("2d");
-    const img = c.createImageData(size, size);
-    function hash(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
-    function smooth(t) { return t * t * (3 - 2 * t); }
-    function noise(x, y) {
-      const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
-      const a = hash(xi, yi), b = hash(xi + 1, yi), cc = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
-      const u = smooth(xf), v = smooth(yf);
-      return (a * (1 - u) + b * u) * (1 - v) + (cc * (1 - u) + d * u) * v;
-    }
-    function fbm(x, y) { let v = 0, a = 0.5, f = 1; for (let i = 0; i < 4; i++) { v += noise(x * f, y * f) * a; a *= 0.55; f *= 2.1; } return v; }
-    function lerp(a, b, t) { return a + (b - a) * t; }
-    function mix3(c1, c2, c3, t) {
-      if (t < 0.55) { const k = t / 0.55; return [lerp(c1[0], c2[0], k), lerp(c1[1], c2[1], k), lerp(c1[2], c2[2], k)]; }
-      const k = (t - 0.55) / 0.45; return [lerp(c2[0], c3[0], k), lerp(c2[1], c3[1], k), lerp(c2[2], c3[2], k)];
-    }
-    const data = img.data;
-    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-      const wx = fbm(x * 0.012 + 13.7, y * 0.012 + 9.1);
-      const wy = fbm(x * 0.012 - 4.3, y * 0.012 + 22.5);
-      const v = fbm(x * 0.018 + wx * 3.0, y * 0.018 + wy * 3.0);
-      const t = Math.min(1, Math.max(0, (v - 0.30) / 0.55));
-      const col = mix3(sc.base, sc.mid, sc.hot, t);
-      const i = (y * size + x) * 4;
-      data[i] = col[0] | 0; data[i + 1] = col[1] | 0; data[i + 2] = col[2] | 0; data[i + 3] = 255;
-    }
-    c.putImageData(img, 0, 0);
-    return off;
-  }
-  const KTEX_SIZE = 256;
-  const ktextures = KSCHEMES.map(s => ({ scheme: s, tex: makeSmokeTexture(s, KTEX_SIZE) }));
+  // the smoke textures are the costly part; a caller can make them ahead of
+  // time, a step at a time (makeKoiTexturesAsync), and hand them in
+  const ktextures = textures ?? KSCHEMES.map(s => ({ scheme: s, tex: makeSmokeTexture(s, KTEX_SIZE) }));
 
   let koi = [], koiLast = -1;
   function koiSpawnPlacement(L) {

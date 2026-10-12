@@ -535,3 +535,13 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
   .vx-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .vx-card__img, .vx-card__img img, .vx-card__img .vx-skin__none { height: 72px; }
 }
+
+/* The Lounge's first-visit loading bar, centred under the navbar */
+.lounge-loading {
+  position: fixed; z-index: 20; left: 50%; top: calc(50% + var(--rail-h) / 2); transform: translate(-50%, -50%);
+  width: min(320px, calc(100vw - 48px)); display: flex; flex-direction: column; align-items: center; gap: 10px;
+  pointer-events: none;
+}
+.lounge-loading__bar { width: 100%; height: 6px; border: 1px solid var(--green-dim); background: var(--void); }
+.lounge-loading__bar > div { height: 100%; background: var(--green); box-shadow: 0 0 10px var(--green); transition: width 0.15s ease-out; }
+.lounge-loading__pct { font-size: 11px; color: var(--fg-dim); font-variant-numeric: tabular-nums; letter-spacing: 0.1em; }

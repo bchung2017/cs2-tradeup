@@ -22,7 +22,10 @@ const FPS = 20;
 const MAX_ELECTRONS = 6;
 const BG = "#020507";
 
-export function initCircuitLite(canvas: HTMLCanvasElement) {
+// `scale` overrides backing pixels per CSS pixel (the Lounge draws its pond
+// floor smaller, since it's seen at an angle).
+export function initCircuitLite(canvas: HTMLCanvasElement, opts: { scale?: number } = {}) {
+  const scale = opts.scale ?? SCALE;
   const ctx = canvas.getContext("2d", { alpha: false });
   const live = { intensity: 0.15, surge: false };
   let stopped = false;
@@ -40,8 +43,8 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
   let vias: Via[] = [];
 
   function layout() {
-    W = Math.max(1, Math.round(innerWidth * SCALE));
-    H = Math.max(1, Math.round(innerHeight * SCALE));
+    W = Math.max(1, Math.round(innerWidth * scale));
+    H = Math.max(1, Math.round(innerHeight * scale));
     for (const c of [canvas, base, glow, lit]) { c.width = W; c.height = H; }
     const D = CIRCUIT_DATA as { vw: number; vh: number; t: number[][][]; p: number[][] };
     const s = Math.max(W / D.vw, H / D.vh);

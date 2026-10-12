@@ -10,6 +10,7 @@
 // Everything is placed relative to the pond (x across, z front-to-back, y up,
 // floor at y = 0) and rises into place as the camera tilts (`update(s)`).
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 const GREEN = 0x33ff33;
 const DIM_GREEN = 0x19a019;
@@ -73,12 +74,37 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   // ── rock face ────────────────────────────────────────────────────────────
   const ROCK_H = 4.6; // about eye height for someone on the patio
   const back = -D / 2 - 0.35; // behind the pond's back wall
+
+  // The ramp's course comes first: the waterfall is sized to keep clear of it.
+  const px0 = W / 2 + 0.35; // the patio's edge
+  const RW = 1.5 * Math.max(0.75, sc); // ramp width
+  const path = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(px0 + 3.6 * sc, rim, 1.6),
+    new THREE.Vector3(px0 + 1.4 * sc, rim + 0.15, -0.6),
+    new THREE.Vector3(W * 0.22, rim + 1.0, 0.4), // swings out over the water…
+    new THREE.Vector3(-W * 0.02, rim + 1.9, -1.0), // …between the waterfall and the koi…
+    new THREE.Vector3(-W * 0.08, ROCK_H - 0.4, -3.6),
+    new THREE.Vector3(-W * 0.02, ROCK_H + 0.3, back - 0.6), // …up onto the rock top
+  ], false, "catmullrom", 0.4);
+  // the ramp's left edge where it climbs past the rock face
+  const rampLeft = Math.min(...path.getSpacedPoints(80).filter((p) => p.z < back + 3).map((p) => p.x)) - RW / 2;
+
+  // The waterfall: its left edge where it always was, its right edge pulled in
+  // to stop short of the ramp. The spring and its stream sit at SPRING_Y.
+  const SPRING_Y = ROCK_H + 0.55;
+  const fallLeft = Math.max(-W / 2 + 0.3, -W * 0.2 - 1.2);
+  const fallRight = Math.min(-W * 0.2 + 1.2, rampLeft - 0.35);
+  const fallW = Math.max(0.5, fallRight - fallLeft);
+  const fallX = fallLeft + fallW / 2;
+  const fallTop = SPRING_Y - 0.05;
   const rock = new THREE.Group();
   let x = -W / 2 - 1.2;
   const rockEnd = W * 0.34;
   while (x < rockEnd) {
     const w = 1.6 + rand() * 1.6;
-    const h = ROCK_H * (0.82 + rand() * 0.3);
+    let h = ROCK_H * (0.82 + rand() * 0.3);
+    // blocks under the falling water stop below the stream: a notch it pours through
+    if (x + w > fallLeft - 0.3 && x < fallRight + 0.3) h = Math.min(h, fallTop - 0.2 + 0.3);
     const d = 2.2 + rand() * 1.4;
     const block = solid(crag(w, h, d, 0.55), rand() > 0.5 ? stone : darkStone);
     block.position.set(x + w / 2, h / 2 - 0.3, back - d / 2 + 0.6);
@@ -98,11 +124,9 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   group.add(rock);
 
   // ── waterfall ────────────────────────────────────────────────────────────
-  const fallX = -W * 0.2;
-  const fallTop = ROCK_H + 0.1;
   const lipZ = back + 0.75;
   const impact = new THREE.Vector2(fallX, lipZ + 0.9);
-  const fallGeo = keep(new THREE.PlaneGeometry(2.4, fallTop - waterY, 1, 24));
+  const fallGeo = keep(new THREE.PlaneGeometry(fallW, fallTop - waterY, 1, 24));
   {
     // bow the sheet outward: water leaves the lip forward and drops
     const p = fallGeo.attributes.position;
@@ -140,24 +164,126 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   group.add(fall);
   // foam ring where it lands
   const foamMat = keep(new THREE.MeshBasicMaterial({ color: 0xb8ffc8, transparent: true, opacity: 0.0, depthWrite: false }));
-  const foam = new THREE.Mesh(keep(new THREE.RingGeometry(0.4, 1.5, 40)), foamMat);
+  const foam = new THREE.Mesh(keep(new THREE.RingGeometry(0.25 * fallW, 0.65 * fallW + 0.3, 40)), foamMat);
   foam.rotation.x = -Math.PI / 2;
   foam.position.set(impact.x, waterY + 0.02, impact.y);
   group.add(foam);
-  // mist: points drifting up and out from the foot
+  // mist: points drifting up and out from the foot. The motion is a function
+  // of time in the vertex shader, so nothing is moved on the CPU per frame.
   const MIST = 140;
   const mistGeo = keep(new THREE.BufferGeometry());
   const mistBase = new Float32Array(MIST * 4);
   for (let i = 0; i < MIST; i++) {
-    mistBase[i * 4] = (rand() - 0.5) * 2.6;
+    mistBase[i * 4] = (rand() - 0.5) * (fallW * 1.1);
     mistBase[i * 4 + 1] = (rand() - 0.5) * 1.2;
     mistBase[i * 4 + 2] = rand(); // phase
     mistBase[i * 4 + 3] = 0.5 + rand(); // speed
   }
   mistGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(MIST * 3), 3));
-  const mistMat = keep(new THREE.PointsMaterial({ color: 0xc8ffd4, size: 0.09, transparent: true, opacity: 0, depthWrite: false }));
+  mistGeo.setAttribute("aBase", new THREE.BufferAttribute(mistBase, 4));
+  const mistMat = keep(new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { uTime: { value: 0 }, uOpacity: { value: 0 }, uOrigin: { value: new THREE.Vector3(impact.x, waterY, impact.y) } },
+    vertexShader: `
+      attribute vec4 aBase;
+      uniform float uTime;
+      uniform vec3 uOrigin;
+      varying float vPh;
+      void main(){
+        float ph = fract(aBase.z + uTime * 0.18 * aBase.w);
+        vPh = ph;
+        vec3 p = uOrigin + vec3(aBase.x * (0.6 + ph), ph * 2.2, aBase.y * (0.6 + ph) + ph * 0.6);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = 90.0 / -mv.z;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform float uOpacity;
+      varying float vPh;
+      void main(){
+        float d = length(gl_PointCoord - 0.5);
+        gl_FragColor = vec4(0.78, 1.0, 0.83, smoothstep(0.5, 0.1, d) * (1.0 - vPh) * uOpacity);
+      }`,
+  }));
   const mist = new THREE.Points(mistGeo, mistMat);
+  mist.frustumCulled = false; // positions come from the shader
   group.add(mist);
+
+  // ── the spring feeding it ────────────────────────────────────────────────
+  // a rock-ringed pool on the rock top, bubbling, and a short stream from it
+  // to the lip, so the water has somewhere to come from
+  const springZ = back - 0.95;
+  const springR = Math.max(0.55, fallW * 0.5);
+  const springStones = new THREE.Group();
+  const plinth = solid(crag(springR * 2 + 1.1, 0.7, springR * 2 + 1.0, 0.2), stone);
+  plinth.position.set(fallX, SPRING_Y - 0.42, springZ);
+  springStones.add(plinth);
+  for (let i = 0; i < 11; i++) {
+    const a = (i / 11) * Math.PI * 2;
+    if (Math.sin(a) > 0.75) continue; // a gap on the lip side, where the stream leaves
+    const st = solid(crag(0.55, 0.38, 0.42, 0.14), darkStone, edgeDim);
+    st.position.set(fallX + Math.cos(a) * (springR + 0.2), SPRING_Y + 0.05, springZ + Math.sin(a) * (springR + 0.2));
+    st.rotation.y = -a;
+    springStones.add(st);
+  }
+  rock.add(springStones);
+  const springMat = keep(new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { uTime: { value: 0 }, uReveal: { value: 0 } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `
+      uniform float uTime, uReveal;
+      varying vec2 vUv;
+      void main(){
+        // rings welling up from the centre, brightest where the water rises
+        float d = length(vUv - 0.5) * 2.0;
+        float ring = smoothstep(0.75, 1.0, sin(d * 18.0 - uTime * 4.0) * 0.5 + 0.5) * (1.0 - d);
+        float core = smoothstep(0.35, 0.0, d);
+        vec3 c = mix(vec3(0.05, 0.35, 0.18), vec3(0.8, 1.0, 0.85), ring * 0.8 + core * 0.6);
+        gl_FragColor = vec4(c, (0.55 + 0.35 * ring + 0.3 * core) * smoothstep(1.0, 0.92, d) * uReveal);
+      }`,
+  }));
+  const pool = new THREE.Mesh(keep(new THREE.CircleGeometry(springR, 40)), springMat);
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.set(fallX, SPRING_Y, springZ);
+  group.add(pool);
+  // the stream: a flat run from the pool's edge to the lip, sloping down slightly
+  const streamGeo = keep(new THREE.BufferGeometry());
+  {
+    const z0 = springZ + springR * 0.8, z1 = lipZ, hw = fallW * 0.48;
+    streamGeo.setAttribute("position", new THREE.Float32BufferAttribute([
+      fallX - hw, SPRING_Y - 0.01, z0, fallX + hw, SPRING_Y - 0.01, z0,
+      fallX - hw, fallTop, z1, fallX + hw, fallTop, z1,
+    ], 3));
+    streamGeo.setAttribute("uv", new THREE.Float32BufferAttribute([0, 1, 1, 1, 0, 0, 1, 0], 2));
+    streamGeo.setIndex([0, 2, 1, 1, 2, 3]);
+  }
+  const stream = new THREE.Mesh(streamGeo, fallMat); // the same streaming water as the fall
+  group.add(stream);
+  // bubbles rising out of the spring, moved in the shader like the mist
+  const BUB = 40;
+  const bubGeo = keep(new THREE.BufferGeometry());
+  const bubBase = new Float32Array(BUB * 4);
+  for (let i = 0; i < BUB; i++) {
+    const a = rand() * Math.PI * 2, rr = Math.sqrt(rand()) * springR * 0.6;
+    bubBase[i * 4] = Math.cos(a) * rr;
+    bubBase[i * 4 + 1] = Math.sin(a) * rr;
+    bubBase[i * 4 + 2] = rand();
+    bubBase[i * 4 + 3] = 0.6 + rand();
+  }
+  bubGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(BUB * 3), 3));
+  bubGeo.setAttribute("aBase", new THREE.BufferAttribute(bubBase, 4));
+  const bubMat = keep(mistMat.clone());
+  bubMat.uniforms.uOrigin.value.set(fallX, SPRING_Y, springZ);
+  bubMat.vertexShader = mistMat.vertexShader.replace(
+    "vec3(aBase.x * (0.6 + ph), ph * 2.2, aBase.y * (0.6 + ph) + ph * 0.6)",
+    "vec3(aBase.x, ph * 0.9, aBase.y)",
+  ).replace("90.0 / -mv.z", "60.0 / -mv.z");
+  const bubbles = new THREE.Points(bubGeo, bubMat);
+  bubbles.frustumCulled = false;
+  group.add(bubbles);
 
   // ── bonsai, out of the side of the rock ──────────────────────────────────
   const tree = new THREE.Group();
@@ -222,7 +348,7 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
     return keep(t);
   })();
   const patio = new THREE.Group();
-  const px0 = W / 2 + 0.35, pw = 6.2 * sc, pz0 = -2.2, pd = D / 2 + 0.35 - pz0;
+  const pw = 6.2 * sc, pz0 = -2.2, pd = D / 2 + 0.35 - pz0;
   const topTex = brickTex.clone(); topTex.repeat.set(pw / 1.2, pd / 1.2); topTex.needsUpdate = true; keep(topTex);
   const sideTex = brickTex.clone(); sideTex.repeat.set(pw / 1.2, 1); sideTex.needsUpdate = true; keep(sideTex);
   const terrace = solid(new THREE.BoxGeometry(pw, rim + 0.6, pd), [
@@ -259,16 +385,8 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   group.add(patio);
 
   // ── S-curved stone ramp with an aqueduct arch over the water ─────────────
-  const path = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(px0 + 3.6 * sc, rim, 1.6),
-    new THREE.Vector3(px0 + 1.4 * sc, rim + 0.15, -0.6),
-    new THREE.Vector3(W * 0.22, rim + 1.0, 0.4), // swings out over the water…
-    new THREE.Vector3(-W * 0.02, rim + 1.9, -1.0), // …between the waterfall and the koi…
-    new THREE.Vector3(-W * 0.08, ROCK_H - 0.4, -3.6),
-    new THREE.Vector3(-W * 0.02, ROCK_H + 0.3, back - 0.6), // …up onto the rock top
-  ], false, "catmullrom", 0.4);
-  const N = 120, RW = 1.5 * Math.max(0.75, sc), RT = 0.32;
-  const rampMats: THREE.MeshLambertMaterial[] = []; // faded in as a unit
+  const N = 120, RT = 0.32;
+  let rampMats: THREE.Material[] = []; // faded in as a unit
   const pts = path.getSpacedPoints(N);
   const up = new THREE.Vector3(0, 1, 0);
   const sideOf = (i: number) => {
@@ -363,16 +481,25 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
     }
   }
 
-  // lighting for the shaded solids: cool sky, green bounce off the water
-  group.add(new THREE.HemisphereLight(0x9fffc0, 0x02140a, 1.6));
-  const key = new THREE.DirectionalLight(0xd8ffe0, 1.4);
-  key.position.set(-6, 14, 8);
-  group.add(key);
+  // ── bake ─────────────────────────────────────────────────────────────────
+  // Lighting is computed once into vertex colours (no lights in the scene, so
+  // every solid draws with the cheapest material), and each rising piece's
+  // meshes and outlines are merged: about 15 draw calls instead of ~150.
+  for (const g of [rock, patio, tree]) bake(g, keep);
+  const swap = new Map<THREE.Material, THREE.Material>();
+  group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && m.material instanceof THREE.MeshLambertMaterial) {
+      const baked = bakedMaterial(m, m.material, keep);
+      swap.set(m.material, baked);
+      m.material = baked;
+    }
+  });
+  rampMats = rampMats.map((m) => swap.get(m) ?? m);
 
   // ── reveal + animate ─────────────────────────────────────────────────────
   // pieces rise in order as the camera tilts: rock, patio, ramp, tree, water
   const rise: [THREE.Object3D, number][] = [[rock, 0], [patio, 0.15], [tree, 0.45]];
-  const mistPos = mistGeo.attributes.position as THREE.BufferAttribute;
   return {
     group,
     impact,
@@ -391,15 +518,125 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
       fallMat.uniforms.uReveal.value = fallIn;
       foamMat.opacity = fallIn * (0.28 + 0.1 * Math.sin(time * 5));
       foam.scale.setScalar(1 + 0.08 * Math.sin(time * 3.1));
-      mistMat.opacity = 0.55 * fallIn;
-      for (let i = 0; i < MIST; i++) {
-        const ph = (mistBase[i * 4 + 2] + time * 0.18 * mistBase[i * 4 + 3]) % 1;
-        mistPos.setXYZ(i, impact.x + mistBase[i * 4] * (0.6 + ph), waterY + ph * 2.2, impact.y + mistBase[i * 4 + 1] * (0.6 + ph) + ph * 0.6);
-      }
-      mistPos.needsUpdate = true;
+      mistMat.uniforms.uTime.value = time;
+      mistMat.uniforms.uOpacity.value = 0.55 * fallIn;
+      springMat.uniforms.uTime.value = time;
+      springMat.uniforms.uReveal.value = fallIn;
+      bubMat.uniforms.uTime.value = time;
+      bubMat.uniforms.uOpacity.value = 0.7 * fallIn;
     },
     dispose() {
       for (const d of disposables) d.dispose();
     },
   };
+}
+
+// ── baking helpers ─────────────────────────────────────────────────────────
+// The light the scene used to have, evaluated once per vertex: a hemisphere
+// (cool sky above, dark green below) plus one key light, with three's Lambert
+// scaling (1/π), in linear colour.
+const SKY = new THREE.Color(0x9fffc0), GROUND = new THREE.Color(0x02140a), KEY = new THREE.Color(0xd8ffe0);
+const KEY_DIR = new THREE.Vector3(-6, 14, 8).normalize();
+const lightAt = (n: THREE.Vector3, out: THREE.Color) =>
+  out.copy(GROUND).lerp(SKY, 0.5 * n.y + 0.5).multiplyScalar(1.6)
+    .add(KEY.clone().multiplyScalar(1.4 * Math.max(0, n.dot(KEY_DIR))))
+    .multiplyScalar(1 / Math.PI);
+
+// Write lit vertex colours into a (non-indexed, flat-normal) geometry whose
+// positions are already in the space the light is defined in.
+function paint(geo: THREE.BufferGeometry, base: (vertex: number) => THREE.Color, emissive?: THREE.Color) {
+  geo.computeVertexNormals();
+  const n = geo.attributes.normal, col = new Float32Array(n.count * 3);
+  const v = new THREE.Vector3(), c = new THREE.Color();
+  for (let i = 0; i < n.count; i++) {
+    lightAt(v.fromBufferAttribute(n, i).normalize(), c).multiply(base(i));
+    if (emissive) c.add(emissive);
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+}
+
+// One Lambert mesh → the same look as an unlit, vertex-coloured material.
+function bakedMaterial(mesh: THREE.Mesh, mat: THREE.MeshLambertMaterial, keep: <T extends { dispose(): void }>(x: T) => T) {
+  mesh.updateMatrixWorld(true);
+  const geo = (mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone());
+  // light in world orientation, then keep the mesh's own transform
+  const world = geo.clone().applyMatrix4(new THREE.Matrix4().extractRotation(mesh.matrixWorld));
+  paint(world, () => mat.color, mat.emissive);
+  geo.setAttribute("color", world.getAttribute("color"));
+  world.dispose();
+  mesh.geometry = keep(geo);
+  return keep(new THREE.MeshBasicMaterial({ vertexColors: true, map: mat.map, side: mat.side, transparent: mat.transparent, opacity: mat.opacity }));
+}
+
+// Merge everything under `root` into one lit mesh (plain Lambert solids, by
+// vertex colour), a mesh per textured material, and one line set per line
+// material. Positions end up in `root`'s space, so it can still be animated.
+function bake(root: THREE.Object3D, keep: <T extends { dispose(): void }>(x: T) => T) {
+  root.updateMatrixWorld(true);
+  const toRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const rot = new THREE.Matrix4().extractRotation(root.matrixWorld);
+  const lit: THREE.BufferGeometry[] = [];
+  const lines = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const keepMeshes: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    const rel = new THREE.Matrix4().multiplyMatrices(toRoot, o.matrixWorld);
+    const mesh = o as THREE.Mesh, seg = o as THREE.LineSegments;
+    if (mesh.isMesh) {
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      const plain = mats.length === 1 && mats[0] instanceof THREE.MeshLambertMaterial && !mats[0].map;
+      if (!plain) { keepMeshes.push(mesh); return; }
+      const mat = mats[0] as THREE.MeshLambertMaterial;
+      const g = (mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone()).applyMatrix4(rel);
+      const lightSpace = g.clone().applyMatrix4(rot);
+      paint(lightSpace, () => mat.color, mat.emissive);
+      g.setAttribute("color", lightSpace.getAttribute("color"));
+      g.deleteAttribute("normal");
+      g.deleteAttribute("uv");
+      lightSpace.dispose();
+      lit.push(g);
+    } else if (seg.isLineSegments) {
+      const g = seg.geometry.clone().applyMatrix4(rel);
+      const m = seg.material as THREE.Material;
+      lines.set(m, [...(lines.get(m) ?? []), g]);
+    }
+  });
+  // textured meshes (the brick terrace) stay as they are, lit per vertex
+  for (const m of keepMeshes) {
+    const mesh = m as THREE.Mesh;
+    m.updateMatrixWorld(true);
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+    const world = geo.clone().applyMatrix4(new THREE.Matrix4().extractRotation(mesh.matrixWorld));
+    const groupOf = (i: number) => geo.groups.find((g) => i >= g.start && i < g.start + g.count)?.materialIndex ?? 0;
+    // a box keeps six face groups even with one material: index only into
+    // the materials there are
+    const matAt = (i: number) => mats.length === 1 ? mats[0] : mats[Math.min(groupOf(i), mats.length - 1)];
+    paint(world, (i) => (matAt(i) as THREE.MeshLambertMaterial).color ?? new THREE.Color(1, 1, 1));
+    geo.setAttribute("color", world.getAttribute("color"));
+    world.dispose();
+    mesh.geometry = keep(geo);
+    mesh.material = mats.map((mm) => keep(new THREE.MeshBasicMaterial({ vertexColors: true, map: (mm as THREE.MeshLambertMaterial).map ?? null })));
+    if (!Array.isArray(mesh.material) || mesh.material.length === 1) mesh.material = (mesh.material as THREE.Material[])[0];
+  }
+  // rebuild root: the kept textured meshes (re-parented in place), the merged
+  // solid and the merged outlines
+  const kept = keepMeshes.map((m) => {
+    const rel = new THREE.Matrix4().multiplyMatrices(toRoot, m.matrixWorld);
+    m.removeFromParent();
+    rel.decompose(m.position, m.quaternion, m.scale);
+    return m;
+  });
+  for (const c of [...root.children]) root.remove(c);
+  for (const m of kept) root.add(m);
+  if (lit.length) {
+    const merged = keep(mergeGeometries(lit)!);
+    for (const g of lit) g.dispose();
+    root.add(new THREE.Mesh(merged, keep(new THREE.MeshBasicMaterial({ vertexColors: true }))));
+  }
+  for (const [m, gs] of lines) {
+    const merged = keep(mergeGeometries(gs)!);
+    for (const g of gs) g.dispose();
+    root.add(new THREE.LineSegments(merged, m));
+  }
 }
