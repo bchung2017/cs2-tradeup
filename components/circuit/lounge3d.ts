@@ -15,6 +15,7 @@ import * as THREE from "three";
 import { initCircuitLite } from "./circuitLite";
 import { createKoiSchool, makeKoiTexturesAsync } from "./koi2d";
 import { buildScenery, type Scenery } from "./loungeScenery";
+import { buildCampus, type Campus } from "./loungeCampus";
 
 const BG = 0x020507;
 const GREEN = 0x33ff33;
@@ -137,6 +138,11 @@ export async function createLounge(
   // the rock face, waterfall, bonsai, patio and ramp (loungeScenery.ts),
   // rebuilt when the screen's shape changes the pond's width
   let scenery: Scenery | null = null;
+  // the corporate campus around it (loungeCampus.ts), laid out from a seed
+  // taken when the Lounge is first built: a new campus each page load, the
+  // same one across resizes and repeat visits
+  let campus: Campus | null = null;
+  const campusSeed = Date.now() & 0x7fffffff;
 
   let W = DEPTH; // floor width in world units, set from the screen's aspect
   function buildBasin() {
@@ -194,6 +200,16 @@ export async function createLounge(
     scenery = buildScenery(W, DEPTH, RIM, WATER_Y);
     scene.add(scenery.group);
     waterMat.uniforms.uImpact.value.copy(scenery.impact);
+    if (campus) { scene.remove(campus.group); campus.dispose(); }
+    const box = new THREE.Box3().setFromObject(basin).union(new THREE.Box3().setFromObject(scenery.group));
+    const t = 0.35;
+    campus = buildCampus(
+      { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z },
+      { minX: -W / 2 - t, maxX: W / 2 + t, minZ: -DEPTH / 2 - t, maxZ: DEPTH / 2 + t },
+      RIM,
+      campusSeed,
+    );
+    scene.add(campus.group);
     frameScene(h);
   }
 
@@ -253,10 +269,13 @@ export async function createLounge(
       isoTarget.addScaledVector(right, dx * halfH * camera.aspect).addScaledVector(upv, dy * halfH);
       isoDist = solve();
     }
-    // fog only softens the far side of the diorama, at any camera distance
+    // pull back past the diorama so the campus around it shows: the pond
+    // stays the centrepiece, the campus fills the rest of the screen
+    isoDist *= camera.aspect < 1 ? 1.45 : 1.75;
+    // fog swallows the campus's far edge, at any camera distance
     const fog = scene.fog as THREE.Fog;
-    fog.near = Math.max(topDist + 4, isoDist * 0.9);
-    fog.far = fog.near + isoDist * 1.4;
+    fog.near = Math.max(topDist + 4, isoDist * 0.95);
+    fog.far = fog.near + isoDist * 2.2;
   }
 
   function poseCamera(at: THREE.Vector3, dist: number, polar: number, azim: number) {
@@ -318,6 +337,7 @@ export async function createLounge(
     basin.visible = s > 0.002;
     edgeMat.opacity = 0.9 * s;
     scenery?.update(time, s);
+    campus?.update(time, s);
     // fade in over the first part of the move so the hand-off from the flat
     // background is a dissolve, not a cut
     const opacity = Math.min(1, u / 0.12);
@@ -364,6 +384,7 @@ export async function createLounge(
   // compile every shader up front, with the scene fully risen so nothing is
   // skipped (parallel compile where the browser supports it)
   scenery!.update(0, 1);
+  campus!.update(0, 1);
   basin.visible = true;
   basin.scale.y = 1;
   waterMat.uniforms.uReveal.value = 1;
@@ -377,6 +398,7 @@ export async function createLounge(
   koiTex.needsUpdate = true;
   renderer.render(scene, camera);
   scenery!.update(0, 0);
+  campus!.update(0, 0);
   basin.visible = false;
   waterMat.uniforms.uReveal.value = 0;
   await step(1);
@@ -397,6 +419,7 @@ export async function createLounge(
       document.removeEventListener("visibilitychange", onVisibility);
       floorRenderer.destroy();
       scenery?.dispose();
+      campus?.dispose();
       renderer.dispose();
       for (const t of [floorTex, koiTex]) t.dispose();
     },
