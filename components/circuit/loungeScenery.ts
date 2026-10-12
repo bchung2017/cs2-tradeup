@@ -3,7 +3,7 @@
 //   rock face   behind the pond, about eye height, jagged low-poly blocks
 //   waterfall   off the rock lip into the pond: streaming sheet, foam, mist
 //   bonsai      a large twisting tree growing out of the side of the rock
-//   patio       a hex-tiled terrace on the right with a bench facing the water
+//   patio       a flagstone terrace on the right with a bench facing the water
 //   ramp        an S-curved stone ramp from the patio, across the pond between
 //               the waterfall and the koi, up to the rock top; over the water
 //               it stands on an aqueduct wall with a semicircular arch
@@ -327,57 +327,90 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   }
   group.add(tree);
 
-  // ── patio, hex-tiled terrace and bench ───────────────────────────────────────
-  // hexagonal tiles: one repeat is 4 columns x 2 rows of flat-topped hexes,
-  // dark stone with a slight shade per tile, on green grout
-  const HEX_TILE_W = 3.0; // world units per repeat, across (4 columns of hexes)
-  const HEX_TILE_H = HEX_TILE_W * (2 * Math.sqrt(3)) / 6; // keeps the hexes regular
-  const tileTex = (() => {
-    const r = 32, W2 = 6 * r, H2 = 112;
+  // ── patio, flagstone terrace and bench ───────────────────────────────────────
+  // Paving like an old quay: the top is crazy paving (irregular flagstones of
+  // mixed tones in grout), the sides and step are big cut slabs, and a coping
+  // of long slabs runs along the waterside edge. Textures are canvas-drawn
+  // and tile seamlessly; each face sets its repeat from its size.
+  const canvasTex = (w: number, h: number, draw: (g: CanvasRenderingContext2D) => void) => {
     const c = document.createElement("canvas");
-    c.width = W2;
-    c.height = H2;
-    const g = c.getContext("2d")!;
-    g.fillStyle = "#1c5c26"; // grout
-    g.fillRect(0, 0, W2, H2);
-    g.scale(1, H2 / (2 * Math.sqrt(3) * r)); // fit two hex rows exactly
-    const shades = ["#0a1a0e", "#0c1f11", "#08160c", "#0e2213", "#091b0f"];
-    for (let i = -1; i <= 4; i++) {
-      for (let j = -1; j <= 2; j++) {
-        const cx = i * 1.5 * r;
-        const cy = j * Math.sqrt(3) * r + (((i % 2) + 2) % 2 ? (Math.sqrt(3) * r) / 2 : 0);
-        g.beginPath();
-        for (let k = 0; k < 6; k++) {
-          const a = (k * Math.PI) / 3;
-          const x = cx + Math.cos(a) * r * 0.9, y = cy + Math.sin(a) * r * 0.9;
-          if (k) g.lineTo(x, y); else g.moveTo(x, y);
-        }
-        g.closePath();
-        // the shade repeats with the tile, so the seams stay invisible
-        g.fillStyle = shades[(((((i % 4) + 4) % 4) * 7 + (((j % 2) + 2) % 2) * 3) % shades.length)];
-        g.fill();
-        g.strokeStyle = "rgba(51,255,51,0.35)";
-        g.lineWidth = 1.5;
-        g.stroke();
-      }
-    }
+    c.width = w;
+    c.height = h;
+    draw(c.getContext("2d")!);
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.colorSpace = THREE.SRGBColorSpace;
     return keep(t);
-  })();
-  const patio = new THREE.Group();
-  const pw = 6.2 * sc, pz0 = -2.2, pd = D / 2 + 0.35 - pz0;
-  const tiles = (across: number, high: number) => {
-    const t = keep(tileTex.clone());
-    t.repeat.set(across / HEX_TILE_W, high / HEX_TILE_H);
+  };
+  // stone tones in the scene's palette: greyed greens, a few warmer, a few pale
+  const STONES = ["#3a5240", "#4a6450", "#56725a", "#3f5a46", "#62806a", "#4d6a48", "#6c8a70", "#445e52", "#587456", "#4f6b5c"];
+  // flagstones: a seamless Voronoi tiling (distances wrap around the edges),
+  // each cell a stone with its own tone and a little grain, grout between
+  const flagTex = canvasTex(256, 256, (g) => {
+    const S = 256, N = 22;
+    const seeds: [number, number, number][] = [];
+    for (let i = 0; i < N; i++) seeds.push([rand() * S, rand() * S, Math.floor(rand() * STONES.length)]);
+    const tones = STONES.map((h) => new THREE.Color(h));
+    const img = g.createImageData(S, S);
+    const wrap = (d: number) => { const a = Math.abs(d) % S; return Math.min(a, S - a); };
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      let d1 = 1e9, d2 = 1e9, k = 0;
+      for (let i = 0; i < N; i++) {
+        const dx = wrap(x - seeds[i][0]), dy = wrap(y - seeds[i][1]);
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < d1) { d2 = d1; d1 = d; k = i; } else if (d < d2) d2 = d;
+      }
+      const gap = d2 - d1; // distance to the nearest cell border
+      const o = (y * S + x) * 4;
+      if (gap < 6) {
+        // dark grout with a glowing thread down its middle, so each stone's
+        // outline still reads from across the pond
+        const glow = Math.max(0, 1 - gap / 1.5);
+        img.data[o] = 5 + 40 * glow; img.data[o + 1] = 12 + 200 * glow; img.data[o + 2] = 8 + 60 * glow;
+      } else {
+        const c = tones[seeds[k][2]];
+        // grain, and a slightly darker rim just inside each stone's edge
+        const grain = 0.85 + 0.3 * (Math.sin(x * 0.9 + k) * Math.sin(y * 1.3 - k) * 0.5 + 0.5) * rand();
+        const rim = gap < 9 ? 0.82 : 1;
+        img.data[o] = Math.min(255, c.r * 255 * grain * rim * 1.0);
+        img.data[o + 1] = Math.min(255, c.g * 255 * grain * rim * 1.0);
+        img.data[o + 2] = Math.min(255, c.b * 255 * grain * rim * 1.0);
+      }
+      img.data[o + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+  });
+  const FLAG_W = 2.6; // world units per flagstone repeat
+  // cut slabs: long rectangles, each a little different in tone
+  const slabTex = (pale: boolean) => canvasTex(256, 64, (g) => {
+    const tones = pale ? ["#3a4d3c", "#405440", "#36483a", "#3d5040"] : ["#1d2f22", "#22362a", "#1a2b20", "#26392b"];
+    const lens = [96, 64, 96];
+    let x = 0, i = 0;
+    for (const L of lens) {
+      g.fillStyle = tones[i++ % tones.length];
+      g.fillRect(x, 0, L, 64);
+      x += L;
+    }
+    g.strokeStyle = "rgba(51,255,51,0.45)";
+    g.lineWidth = 2;
+    x = 0;
+    for (const L of lens) { g.strokeRect(x + 1, 1, L - 2, 62); x += L; }
+  });
+  const slabSide = slabTex(false);
+  const slabPale = slabTex(true);
+  const SLAB_W = 2.4, SLAB_H = 0.6; // world units per slab repeat (256 x 64 px)
+  const paved = (base: THREE.Texture, across: number, high: number, perW: number, perH: number) => {
+    const t = keep(base.clone());
+    t.repeat.set(across / perW, high / perH);
     t.needsUpdate = true;
     return t;
   };
+  const patio = new THREE.Group();
+  const pw = 6.2 * sc, pz0 = -2.2, pd = D / 2 + 0.35 - pz0;
   const faceH = rim + 0.6;
-  const topTex = tiles(pw, pd);
-  const sideTex = tiles(pw, faceH); // front and back faces
-  const endTex = tiles(pd, faceH); // the narrow ends
+  const topTex = paved(flagTex, pw, pd, FLAG_W, FLAG_W);
+  const sideTex = paved(slabSide, pw, faceH, SLAB_W, SLAB_H); // front and back faces
+  const endTex = paved(slabSide, pd, faceH, SLAB_W, SLAB_H); // the narrow ends
   const terrace = solid(new THREE.BoxGeometry(pw, rim + 0.6, pd), [
     keep(new THREE.MeshLambertMaterial({ map: endTex })),
     keep(new THREE.MeshLambertMaterial({ map: endTex })),
@@ -388,10 +421,15 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   ] as unknown as THREE.Material);
   terrace.position.set(px0 + pw / 2, (rim - 0.6) / 2, pz0 + pd / 2);
   patio.add(terrace);
-  // a low tiled step down along the front
-  const step = solid(new THREE.BoxGeometry(pw, 0.45, 0.8), keep(new THREE.MeshLambertMaterial({ map: tiles(pw, 0.8) })));
+  // a low slab step down along the front
+  const step = solid(new THREE.BoxGeometry(pw, 0.45, 0.8), keep(new THREE.MeshLambertMaterial({ map: paved(slabSide, pw, 0.45, SLAB_W, SLAB_H) })));
   step.position.set(px0 + pw / 2, 0.22 - 0.6 + 0.45, D / 2 + 0.35 + 0.4);
   patio.add(step);
+  // coping: a band of long pale slabs along the waterside edge, slightly proud
+  const copeW = 0.55 * Math.max(0.7, sc);
+  const coping = solid(new THREE.BoxGeometry(copeW, 0.1, pd), keep(new THREE.MeshLambertMaterial({ map: paved(slabPale, copeW, pd, SLAB_H, SLAB_W) })));
+  coping.position.set(px0 + copeW / 2, rim + 0.05, pz0 + pd / 2);
+  patio.add(coping);
   // bench facing the pond
   const bench = new THREE.Group();
   const seat = solid(new THREE.BoxGeometry(0.55, 0.12, 2.4), bark, edge);
@@ -628,7 +666,7 @@ function bake(root: THREE.Object3D, keep: <T extends { dispose(): void }>(x: T) 
       lines.set(m, [...(lines.get(m) ?? []), g]);
     }
   });
-  // textured meshes (the tiled terrace) stay as they are, lit per vertex
+  // textured meshes (the paved terrace) stay as they are, lit per vertex
   for (const m of keepMeshes) {
     const mesh = m as THREE.Mesh;
     m.updateMatrixWorld(true);
