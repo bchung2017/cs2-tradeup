@@ -1,7 +1,9 @@
 "use client";
 
-// Market Ventures: every contract the last run found, as a list you can cut down
-// and reorder. Filter and sort state lives in the URL, so a view can be shared.
+// The Venture list: every contract the last run found (Market Ventures), or
+// every contract your inventory can start (My Ventures, `mine`), as a list you
+// can cut down and reorder. Filter and sort state lives in the URL, so a view
+// can be shared.
 import { useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { ExpiredFile, Venture, VenturesFile } from "@/lib/ventures";
@@ -39,7 +41,14 @@ const SORTS = {
   liquid: { label: "Winners sell fastest", fn: (a: Venture, b: Venture) => winnerSales(b) - winnerSales(a) },
 } as const;
 
-export default function MarketList({ data, expired, images }: { data: VenturesFile; expired: ExpiredFile; images: Record<string, string> }) {
+export default function MarketList({
+  data, expired, images, mine: mineMode = false,
+}: {
+  data: VenturesFile;
+  expired: ExpiredFile;
+  images: Record<string, string>;
+  mine?: boolean; // every row already uses your inventory
+}) {
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -65,6 +74,7 @@ export default function MarketList({ data, expired, images }: { data: VenturesFi
   const doppler = get("doppler") === "1";
   const mine = get("mine") === "1";
   const freshH = Number(get("fresh") || 0);
+  const trackedOnly = get("tracked") === "1";
   const sort = (get("sort", "back") in SORTS ? get("sort", "back") : "back") as SortKey;
 
   // until mounted, judge "new" and "checked within" against the run time, which
@@ -85,13 +95,16 @@ export default function MarketList({ data, expired, images }: { data: VenturesFi
         if (doppler && !v.outcomes.some((o) => /Doppler/.test(o.name))) return false;
         if (mine && !plans.get(v.key)?.ownedCount) return false;
         if (freshH && (!v.verifiedAt || now - Date.parse(v.verifiedAt) > freshH * 3600e3)) return false;
+        if (trackedOnly && !tracked[v.key]) return false;
         return true;
       })
       .sort(SORTS[sort].fn);
-  }, [data, q, tier, verdict, minCost, maxCost, minPays, venue, knifeOnly, doppler, mine, freshH, sort, plans, now]);
+  }, [data, q, tier, verdict, minCost, maxCost, minPays, venue, knifeOnly, doppler, mine, freshH, trackedOnly, tracked, sort, plans, now]);
 
   if (!data.ventures.length) {
-    return <p className="vx-empty">No run yet. Run <code>npx tsx scripts/igl9000-ventures.ts</code> or wait for the weekly sync.</p>;
+    return mineMode
+      ? <p className="vx-empty">Nothing in this inventory can start a contract on the list: no Covert that opens a knife contract, and no skin that fits a market contract inside its float budget.</p>
+      : <p className="vx-empty">No run yet. Run <code>npx tsx scripts/igl9000-ventures.ts</code> or wait for the weekly sync.</p>;
   }
 
   return (
@@ -137,9 +150,12 @@ export default function MarketList({ data, expired, images }: { data: VenturesFi
         </label>
         <label className="vx-check"><input type="checkbox" checked={knifeOnly} onChange={(e) => set("knife", e.target.checked ? "1" : "")} /> knives only</label>
         <label className="vx-check"><input type="checkbox" checked={doppler} onChange={(e) => set("doppler", e.target.checked ? "1" : "")} /> has a Doppler</label>
-        <label className="vx-check" title={owned ? `inventory from ${ago(owned.at, now)}` : "load your inventory in INVENTORY or My Ventures first"}>
-          <input type="checkbox" checked={mine} disabled={!owned} onChange={(e) => set("mine", e.target.checked ? "1" : "")} /> uses items I own
-        </label>
+        {!mineMode && (
+          <label className="vx-check" title={owned ? `inventory from ${ago(owned.at, now)}` : "load your inventory in INVENTORY or My Ventures first"}>
+            <input type="checkbox" checked={mine} disabled={!owned} onChange={(e) => set("mine", e.target.checked ? "1" : "")} /> uses items I own
+          </label>
+        )}
+        <label className="vx-check"><input type="checkbox" checked={trackedOnly} onChange={(e) => set("tracked", e.target.checked ? "1" : "")} /> tracked only</label>
         <label>Sort
           <select value={sort} onChange={(e) => set("sort", e.target.value === "back" ? "" : e.target.value)}>
             {Object.entries(SORTS).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}
@@ -149,7 +165,7 @@ export default function MarketList({ data, expired, images }: { data: VenturesFi
 
       <p className="vx-count hud">
         {rows.length} of {data.ventures.length} contracts · run <Ago iso={data.generatedAt} />
-        {expired.rows.length > 0 && ` · ${expired.rows.filter((r) => now - Date.parse(r.expiredAt) < NEW_MS * 7).length} gone this week`}
+        {!mineMode && expired.rows.length > 0 && ` · ${expired.rows.filter((r) => now - Date.parse(r.expiredAt) < NEW_MS * 7).length} gone this week`}
       </p>
 
       <ul className="vx-list">

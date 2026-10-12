@@ -1,9 +1,8 @@
 // Venture: trade-up contracts found by IGL-9000. Two pages, picked from the top
 // rail's VENTURE menu: Market Ventures (what's out there now) and My Ventures
-// (what your inventory can start, plus what you track).
+// (every contract your inventory can start).
 import type { Metadata } from "next";
 import VentureHeading from "@/components/venture/VentureHeading";
-import { STANDING_LINE } from "@/lib/venture-copy";
 
 export const metadata: Metadata = {
   title: "CS2 Journeyman · Venture",
@@ -19,7 +18,6 @@ export default function VentureLayout({ children }: { children: React.ReactNode 
           <VentureHeading />
         </div>
       </header>
-      <p className="vx-standing">{STANDING_LINE}</p>
       {children}
     </main>
   );

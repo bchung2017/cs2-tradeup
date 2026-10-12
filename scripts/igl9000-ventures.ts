@@ -51,7 +51,7 @@ const prevLong = read<LonglistFile>(`${OUT}/ventures-longlist.json`, { generated
 const seenLong = new Map(prevLong.rows.map((r) => [r.key, r.firstSeenAt]));
 const long = read<LonglistFile>(`${TMP}/longlist.json`, { generatedAt: now, rows: [] });
 const rows = long.rows.filter(rowCanProfit).map((r) => ({ ...r, firstSeenAt: seenLong.get(r.key) ?? r.firstSeenAt }));
-writeFileSync(`${OUT}/ventures-longlist.json`, JSON.stringify({ generatedAt: now, rows } satisfies LonglistFile));
+writeFileSync(`${OUT}/ventures-longlist.json`, JSON.stringify({ generatedAt: now, rows, pools: long.pools, values: long.values } satisfies LonglistFile));
 
 // ── expired: market ventures that were there last run and aren't now ───────
 const expired = read<ExpiredFile>(`${OUT}/ventures-expired.json`, { rows: [] });

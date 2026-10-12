@@ -83,6 +83,13 @@ export interface Venture {
 export interface LonglistRow {
   key: string;
   owned: string;
+  // runs since the full-contract expansion also carry these (lib/longlist-venture.ts)
+  ownedId?: string;
+  ownedFloat?: number; // the middle of its wear grade: your copy's float isn't known
+  ownedPool?: string;
+  fillerId?: string;
+  fillerFloat?: number;
+  fillerPool?: string;
   ownedWear: string;
   ownedCount: number;
   ownedValue: number; // what selling one nets
@@ -121,6 +128,9 @@ export interface VenturesFile {
 export interface LonglistFile {
   generatedAt: string;
   rows: LonglistRow[];
+  // short collection name → its knives, one entry per Doppler phase
+  pools?: Record<string, { name: string; knives: { skinId: string; name: string; phase?: string; min: number; max: number }[] }>;
+  values?: Record<string, number>; // "skinId|Factory New" → what selling it nets (top buy order less fee)
 }
 export interface ExpiredFile {
   rows: { key: string; title: string; firstSeenAt: string; expiredAt: string; backPerDollar: number }[];

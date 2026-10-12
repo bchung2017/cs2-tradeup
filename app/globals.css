@@ -234,7 +234,6 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 
 .vx-head { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; padding-bottom: 12px; border-bottom: 1px solid var(--surface-line); }
 .vx-title { margin: 4px 0 0; font-size: 28px; font-weight: 700; color: var(--green); letter-spacing: -0.01em; }
-.vx-standing { margin: 10px 0 16px; font-size: 12px; color: var(--fg-dim); max-width: 92ch; line-height: 1.5; }
 
 .vx-filters { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; padding: 12px; background: var(--surface); border: 1px solid var(--surface-line); }
 .vx-filters label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-dim); }

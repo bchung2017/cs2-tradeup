@@ -13,9 +13,11 @@
  *   - the owned item is valued at what selling it nets (its opportunity cost)
  *   - fillers at the third-party lowest ask, float-blind, from their cheapest grade
  *   - every float at the middle of its wear grade (owned floats aren't known)
- *   - knives at the top buy order (Doppler phases split evenly, see lib/igl9000-knife.ts)
+ *   - knives at the top buy order, each Doppler phase its own outcome (lib/doppler.ts)
  *   - non-StatTrak only
- * Writes <out>.csv and <out>.json.
+ * Writes <out>.csv and <out>.json. The JSON also carries every knife pool (one
+ * entry per Doppler phase) and each entry's value per wear, so the site can
+ * expand any row into a full contract (lib/longlist-venture.ts).
  */
 import { writeFileSync } from "node:fs";
 import { WEAR_RANGES, type Skin, type Wear } from "@/types/cs2";
@@ -23,7 +25,8 @@ import { loadSkins } from "@/lib/data";
 import { floatToWear } from "@/lib/tradeup";
 import { FEEDS, loadFeed, quoteOf } from "@/lib/third-party-feeds";
 import { buildPools, knifeValuer, type Pool } from "@/lib/igl9000-knife";
-import type { LonglistRow } from "@/lib/ventures";
+import type { LonglistFile, LonglistRow } from "@/lib/ventures";
+import { phaseShares, withPhase } from "@/lib/doppler";
 
 const argv = process.argv.slice(2);
 const arg = (k: string) => {
@@ -41,6 +44,8 @@ const { sale, valueOf } = knifeValuer(tables, FEE);
 const pools = [...buildPools(skins).values()];
 const poolOf = new Map<string, Pool>();
 for (const p of pools) for (const s of p.inputs) poolOf.set(s.id, p);
+const phaseRows = new Map<string, Skin[]>();
+for (const s of skins) if (s.phase) phaseRows.set(s.name, [...(phaseRows.get(s.name) ?? []), s]);
 
 // wear grades a skin exists in, with the middle float of each
 function grades(s: Skin): { wear: Wear; mid: number }[] {
@@ -64,8 +69,8 @@ for (const p of pools) {
 }
 
 interface Row {
-  owned: string; ownedWear: string; ownedCount: number; ownedValue: number;
-  filler: string; fillerWear: string; fillerCount: number; fillerAsk: number;
+  owned: string; ownedId: string; ownedWear: string; ownedCount: number; ownedValue: number; ownedFloat: number; ownedPool: string;
+  filler: string; fillerId: string; fillerWear: string; fillerCount: number; fillerAsk: number; fillerFloat: number; fillerPool: string;
   pools: string; knifeItems: number; adjustedFloat: number;
   cost: number; evFast: number; evPatient: number; rtp: number; pProfit: number; p1k: number;
   best: string; bestValue: number;
@@ -104,7 +109,9 @@ for (const A of pools) {
               priced += p;
               ev += p * kv.fast;
               evP += p * (kv.patient ?? kv.fast);
-              outs.push({ name: `${k.name} (${ABBR[w]})`, p, v: kv.fast });
+              if (!kv.phases) { outs.push({ name: `${k.name} (${ABBR[w]})`, p, v: kv.fast }); continue; }
+              const ps = phaseShares(kv.phases.map((x) => x.phase));
+              for (const ph of kv.phases) outs.push({ name: `${withPhase(k.name, ph.phase)} (${ABBR[w]})`, p: p * ps.get(ph.phase)!, v: ph.fast! });
             }
           }
           if (priced < 0.95) continue; // too much of the pool unpriced to say anything
@@ -112,8 +119,8 @@ for (const A of pools) {
           const best = outs.reduce((a, o) => (o.v > a.v ? o : a));
           if (best.v <= cost) continue; // no outcome beats the cost
           options.push({
-            owned: s.name, ownedWear: ABBR[g.wear], ownedCount: own, ownedValue: v,
-            filler: f.skin.name, fillerWear: ABBR[f.wear], fillerCount: nf, fillerAsk: f.ask,
+            owned: s.name, ownedId: s.id, ownedWear: ABBR[g.wear], ownedCount: own, ownedValue: v, ownedFloat: g.mid, ownedPool: short(A.name),
+            filler: f.skin.name, fillerId: f.skin.id, fillerWear: ABBR[f.wear], fillerCount: nf, fillerAsk: f.ask, fillerFloat: f.mid, fillerPool: short(B.name),
             pools: [...share.keys()].map((P) => short(P.name)).join(" + "),
             knifeItems: outs.length, adjustedFloat: T,
             cost, evFast: ev, evPatient: evP, rtp: ev / cost,
@@ -139,15 +146,37 @@ const now = new Date().toISOString();
 const r4 = (n: number) => Math.round(n * 1e4) / 1e4;
 const longlist: LonglistRow[] = rows.map((r) => ({
   key: `${r.owned}@${r.ownedWear}x${r.ownedCount}+${r.filler}@${r.fillerWear}x${r.fillerCount}`,
-  owned: r.owned, ownedWear: r.ownedWear, ownedCount: r.ownedCount, ownedValue: r2(r.ownedValue),
-  filler: r.filler, fillerWear: r.fillerWear, fillerCount: r.fillerCount, fillerAsk: r2(r.fillerAsk),
+  owned: r.owned, ownedId: r.ownedId, ownedWear: r.ownedWear, ownedCount: r.ownedCount, ownedValue: r2(r.ownedValue), ownedFloat: r4(r.ownedFloat), ownedPool: r.ownedPool,
+  filler: r.filler, fillerId: r.fillerId, fillerWear: r.fillerWear, fillerCount: r.fillerCount, fillerAsk: r2(r.fillerAsk), fillerFloat: r4(r.fillerFloat), fillerPool: r.fillerPool,
   pools: r.pools.split(" + "), knifeItems: r.knifeItems, adjustedFloat: r4(r.adjustedFloat),
   cost: r2(r.cost), value: r2(r.evFast), valuePatient: r2(r.evPatient), backPerDollar: r4(r.rtp),
   pProfit: r4(r.pProfit), p1k: r4(r.p1k),
   top: r.top.map((t) => ({ name: t.name, probability: r4(t.probability), value: r2(t.value) })),
   firstSeenAt: now,
 }));
-writeFileSync(`${OUT}.json`, JSON.stringify({ generatedAt: now, rows: longlist }));
+// every pool a row draws on: its knives (one entry per Doppler phase) and what
+// each sells for at each wear, so a row can be expanded into a full contract
+const used = new Set(rows.flatMap((r) => [r.ownedPool, r.fillerPool]));
+const poolTable: NonNullable<LonglistFile["pools"]> = {};
+const values: NonNullable<LonglistFile["values"]> = {};
+for (const P of pools) {
+  if (!used.has(short(P.name))) continue;
+  const knives: NonNullable<LonglistFile["pools"]>[string]["knives"] = [];
+  for (const k of P.knives) {
+    const entries = phaseRows.get(k.name) ?? [k];
+    for (const e of entries) knives.push({ skinId: e.id, name: e.name, ...(e.phase ? { phase: e.phase } : {}), min: e.min_float, max: e.max_float });
+    for (const g of WEAR_RANGES) {
+      if (g.min >= k.max_float || g.max <= k.min_float) continue;
+      const kv = valueOf(k, g.wear);
+      for (const e of entries) {
+        const val = e.phase ? kv.phases?.find((x) => x.phase === e.phase)?.fast : kv.fast;
+        if (val != null) values[`${e.id}|${g.wear}`] = r2(val);
+      }
+    }
+  }
+  poolTable[short(P.name)] = { name: P.name, knives };
+}
+writeFileSync(`${OUT}.json`, JSON.stringify({ generatedAt: now, rows: longlist, pools: poolTable, values } satisfies LonglistFile));
 
 const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
 console.log(`\nIGL-9000 · knife longlist   ${pools.length} collections with a knife pool   ${ownedItems} owned-item wears priced   ${rows.length} contracts → ${OUT}.csv / .json`);

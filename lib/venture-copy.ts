@@ -62,5 +62,3 @@ export function ventureLine(v: Venture): string {
   return `${hit}. Over many pulls it's ${vs}.`;
 }
 
-export const STANDING_LINE =
-  "Sorted by how much comes back. At live prices almost nothing here returns more than it costs: every row is a bet with a known price.";
