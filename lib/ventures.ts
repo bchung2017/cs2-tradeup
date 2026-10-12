@@ -45,7 +45,8 @@ export interface VentureOutcome {
   checked: boolean; // value is a live price
   sold24h: number | null;
   win: boolean; // sells for more than the contract cost, and has sold
-  rarePhases?: { phase: string; value: number | null }[];
+  phase?: string; // Doppler / Gamma Doppler: this outcome is one phase (lib/doppler.ts)
+  rarePhases?: { phase: string; value: number | null }[]; // older runs: one outcome per Doppler, gems listed here
 }
 
 export interface Venture {

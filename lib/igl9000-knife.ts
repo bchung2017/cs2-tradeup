@@ -5,11 +5,12 @@
  * Values come from the Buff163 and CSFloat feeds (lib/third-party-feeds.ts):
  *   fast    = top buy order × (1 − fee)
  *   patient = lowest ask × (1 − fee), or the fast value when the ask is > 3× the buy order
- * A Doppler or Gamma Doppler is the even average of its phases, an upper bound
- * for the rare ones (Ruby, Sapphire, Black Pearl, Emerald).
+ * A Doppler or Gamma Doppler is priced per phase; its value is the average
+ * over phases weighted by the estimated phase odds in lib/doppler.ts.
  */
 import type { Skin, Wear } from "@/types/cs2";
 import { phasesOf, quoteOf, type FeedTable } from "@/lib/third-party-feeds";
+import { phaseShares } from "@/lib/doppler";
 
 const EXCLUDED = "Limited Edition Item";
 export const colsOf = (s: Skin) => s.collections.filter((c) => c.name !== EXCLUDED);
@@ -33,7 +34,7 @@ export function buildPools(skins: Skin[]): Map<string, Pool> {
   return pools;
 }
 
-export interface Value { fast: number | null; patient: number | null; phases?: { phase: string; fast: number | null }[] }
+export interface Value { fast: number | null; patient: number | null; phases?: { phase: string; fast: number | null; patient: number | null }[] }
 
 export function knifeValuer(tables: FeedTable[], fee: number) {
   const cache = new Map<string, Value>();
@@ -55,10 +56,11 @@ export function knifeValuer(tables: FeedTable[], fee: number) {
     else {
       const per = phases.map((phase) => ({ phase, ...sale(name, phase) }));
       const ok = per.every((p) => p.fast != null);
+      const w = phaseShares(phases);
       v = {
-        fast: ok ? per.reduce((a, p) => a + p.fast!, 0) / per.length : null,
-        patient: ok ? per.reduce((a, p) => a + (p.patient ?? p.fast!), 0) / per.length : null,
-        phases: per.map(({ phase, fast }) => ({ phase, fast })),
+        fast: ok ? per.reduce((a, p) => a + w.get(p.phase)! * p.fast!, 0) : null,
+        patient: ok ? per.reduce((a, p) => a + w.get(p.phase)! * (p.patient ?? p.fast!), 0) : null,
+        phases: per,
       };
     }
     cache.set(name, v);

@@ -9,6 +9,7 @@ import {
   type TradeupResult,
   type Wear,
 } from "@/types/cs2";
+import { phaseShares } from "@/lib/doppler";
 
 function nextRarity(r: Rarity): Rarity | null {
   const i = RARITY_ORDER.indexOf(r);
@@ -151,8 +152,21 @@ export function computeTradeup(args: ComputeArgs): TradeupResult {
       );
       continue;
     }
-    const kC = candidates.length;
+    // k_C counts skins, not catalog rows: a Doppler's phases are one skin
+    // whose share is split across its phases (lib/doppler.ts), not seven skins.
+    const byName = new Map<string, Skin[]>();
+    for (const c of candidates) byName.set(c.name, [...(byName.get(c.name) ?? []), c]);
+    const kC = byName.size;
     const probPerSkin = nC / (N * kC);
+    const shareOf = new Map<string, number>();
+    for (const rows of byName.values()) {
+      if (rows.length < 2 || !rows.every((r) => r.phase)) {
+        for (const r of rows) shareOf.set(r.id, 1 / rows.length);
+        continue;
+      }
+      const shares = phaseShares(rows.map((r) => r.phase!));
+      for (const r of rows) shareOf.set(r.id, shares.get(r.phase!)!);
+    }
     for (const out of candidates) {
       const outFloat = denormalizeFloat(avgNormalized, out.min_float, out.max_float);
       const wear = floatToWear(outFloat);
@@ -160,7 +174,7 @@ export function computeTradeup(args: ComputeArgs): TradeupResult {
       const priceEntry = prices[priceKey];
       outcomes.push({
         skin: out,
-        probability: probPerSkin,
+        probability: probPerSkin * shareOf.get(out.id)!,
         outputFloat: outFloat,
         outputWear: wear,
         estimatedPrice: priceEntry?.median ?? null,

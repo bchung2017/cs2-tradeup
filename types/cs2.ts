@@ -52,6 +52,9 @@ export interface Skin {
   souvenir?: boolean;
   collections: Collection[];
   image?: string;
+  // Doppler / Gamma Doppler only: which phase this catalog entry is ("Phase 1",
+  // "Ruby", "Emerald", …). The catalog has one entry per phase under one name.
+  phase?: string;
   // True for ★-marked inventory knives. Drives the auto ×5 knife contract size
   // (the catalog carries no knives, so this is only ever set from inventory).
   isKnife?: boolean;

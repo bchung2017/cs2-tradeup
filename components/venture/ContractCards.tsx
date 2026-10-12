@@ -8,6 +8,7 @@ import type { FitOwned, Plan } from "@/lib/venture-fit";
 import { rarityHex, signedUsd } from "@/lib/display";
 import { abbr, money, oneIn } from "@/lib/venture-copy";
 import { OutcomeBar } from "./FloatBar";
+import { withPhase } from "@/lib/doppler";
 import { Thumb, useImages } from "./SkinStack";
 
 const steamUrl = (skin: string, wear: string) => `https://steamcommunity.com/market/listings/730/${encodeURIComponent(`${skin} (${wear})`)}`;
@@ -83,7 +84,7 @@ export function OutcomeCards({ v }: { v: Venture }) {
 function OutcomeCard({ o, cost, best, image }: { o: VentureOutcome; cost: number; best: boolean; image?: string }) {
   const profit = o.value == null ? null : o.value - cost;
   const tone = profit == null ? "flat" : profit > 0 ? "up" : "down";
-  const [weapon, paint] = split(o.name);
+  const [weapon, paint] = split(withPhase(o.name, o.phase));
   return (
     <article className={`vx-card vx-card--out is-${tone}`} style={{ ["--rar" as string]: rarityHex(o.rarity) }}>
       <header className="vx-card__chips">
@@ -91,7 +92,7 @@ function OutcomeCard({ o, cost, best, image }: { o: VentureOutcome; cost: number
         <span className={`vx-card__profit is-${tone}`}>{profit == null ? "—" : signedUsd(profit)}</span>
       </header>
       {best && <span className="vx-card__best">BEST</span>}
-      <div className="vx-card__img"><Thumb src={image} alt={o.name} w={120} h={90} /></div>
+      <div className="vx-card__img"><Thumb src={image} alt={withPhase(o.name, o.phase)} w={120} h={90} /></div>
       <OutcomeBar float={o.float} min={o.skinMin} max={o.skinMax} />
       <div className="vx-card__name"><b>{weapon}</b><span>{paint}</span></div>
       <div className="vx-card__meta">

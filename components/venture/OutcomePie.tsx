@@ -9,6 +9,7 @@ import type { Venture, VentureOutcome } from "@/lib/ventures";
 import { abbr, money } from "@/lib/venture-copy";
 import { rarityHex, signedUsd } from "@/lib/display";
 import { arcPath, PIE_COLORS, roiColor } from "@/lib/pie";
+import { withPhase } from "@/lib/doppler";
 import { Thumb, useImages } from "./SkinStack";
 
 const SIZE = 92;
@@ -78,7 +79,7 @@ export default function OutcomePie({ v }: { v: Venture }) {
               onPointerEnter={enter(o.skinId)}
               onClick={tap(o.skinId)}
             >
-              <Thumb src={images[o.skinId]} alt={o.name} w={48} h={36} />
+              <Thumb src={images[o.skinId]} alt={withPhase(o.name, o.phase)} w={48} h={36} />
               <figcaption>{money(o.value)}</figcaption>
             </figure>
           );
@@ -98,11 +99,11 @@ function OutcomeCard({ s, cost, image }: { s: Slice; cost: number; image?: strin
   return (
     <div className="vx-outcard" role="tooltip" style={{ borderColor: s.color }}>
       <div className="vx-outcard__img" style={{ borderBottomColor: rarityHex(o.rarity) }}>
-        <Thumb src={image} alt={o.name} w={96} h={72} />
+        <Thumb src={image} alt={withPhase(o.name, o.phase)} w={96} h={72} />
       </div>
       <div className="vx-outcard__name">
         <span className="vx-outcard__dot" style={{ background: s.color }} />
-        {o.name.replace(/^★ /, "")} <span className="dim">({abbr(o.wear)})</span>
+        {withPhase(o.name, o.phase).replace(/^★ /, "")} <span className="dim">({abbr(o.wear)})</span>
       </div>
       <dl>
         <dt>chance</dt>

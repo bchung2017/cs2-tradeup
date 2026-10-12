@@ -5,6 +5,7 @@ import SkinPicker from "@/components/SkinPicker";
 import PriceModal, { marketName } from "@/components/PriceModal";
 import { oddsString, rarityColor, rarityHex, signedUsd, usd } from "@/lib/display";
 import { arcPath, PIE_COLORS, roiColor } from "@/lib/pie";
+import { withPhase } from "@/lib/doppler";
 import { numCompare } from "@/lib/util";
 import { floatToWear } from "@/lib/tradeup";
 import { makeSlots, useTradeup } from "@/lib/tradeup-context";
@@ -701,7 +702,7 @@ function OutcomeCard({
         <span style={{ fontSize: 10, color: "var(--cream-dim)", letterSpacing: "0.04em" }}>
           {o.skin.weapon.name}
         </span>
-        <div style={{ fontSize: 13, lineHeight: 1.25, marginTop: 2 }}>{o.skin.name}</div>
+        <div style={{ fontSize: 13, lineHeight: 1.25, marginTop: 2 }}>{withPhase(o.skin.name, o.skin.phase)}</div>
       </div>
 
       {/* wear / float */}
@@ -980,7 +981,7 @@ function ResultViz({
                   data-keep-selection
                   style={{ cursor: "pointer", transition: "opacity 0.2s" }}
                 >
-                  <title>{`${s.o.skin.weapon.name} | ${s.o.skin.name} · ${pcs(s.o.probability)}`}</title>
+                  <title>{`${withPhase(s.o.skin.name, s.o.skin.phase)} · ${pcs(s.o.probability)}`}</title>
                 </path>
               );
             })}
@@ -1101,7 +1102,7 @@ function ResultViz({
                     />
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ color: "var(--cream-dim)" }}>{s.o.skin.weapon.name} | </span>
-                      {s.o.skin.name}{" "}
+                      {withPhase(s.o.skin.name, s.o.skin.phase)}{" "}
                       <span className="hud" style={{ fontSize: 8 }}>{s.o.outputWear}</span>
                     </span>
                     <span className="hud" style={{ flexShrink: 0, minWidth: 44, textAlign: "right" }}>

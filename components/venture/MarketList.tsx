@@ -73,7 +73,7 @@ export default function MarketList({ data, expired, images }: { data: VenturesFi
   const rows = useMemo(() => {
     return data.ventures
       .filter((v) => {
-        if (q && ![...v.inputs.map((i) => i.skin), ...v.collections, ...v.outcomes.map((o) => o.name)].some((s) => s.toLowerCase().includes(q))) return false;
+        if (q && ![...v.inputs.map((i) => i.skin), ...v.collections, ...v.outcomes.map((o) => (o.phase ? `${o.name} ${o.phase}` : o.name))].some((s) => s.toLowerCase().includes(q))) return false;
         if (tier && v.tier !== tier) return false;
         if (verdict === "holds" && v.verdict !== "holds") return false;
         if (verdict === "near" && v.backPerDollar < 0.85) return false;

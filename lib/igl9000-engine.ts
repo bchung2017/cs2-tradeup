@@ -146,20 +146,17 @@ export function valueContract(
   }
 
   // Collapse catalog rows that are the same tradeable item. The catalog lists
-  // each Doppler as seven skins (Phase 1-4, Ruby, Sapphire, Black Pearl) while
-  // the market prices them under ONE name, so counting each row as its own
-  // outcome hands Doppler ~7x the weight of a single-row finish. Group by
-  // (name, wear), take the per-ROW probability of each group (they are equal by
-  // construction), then renormalise — which restores one share per distinct
-  // item. Exact for single-collection contracts; for mixed contracts whose
-  // collections duplicate at different rates it is a close approximation.
+  // each Doppler as one row per phase while the Steam market prices them under
+  // ONE name. computeTradeup already splits a Doppler's share across its phase
+  // rows (lib/doppler.ts), so summing a (name, wear) group gives that item's
+  // probability exactly.
   const groups = new Map<string, { rows: number; p: number; o: (typeof structural.outcomes)[number] }>();
   for (const o of structural.outcomes) {
     const key = `${o.skin.name}|${o.outputWear}`;
     const g = groups.get(key);
     if (g) { g.rows++; g.p += o.probability; } else { groups.set(key, { rows: 1, p: o.probability, o }); }
   }
-  const perItem = [...groups.values()].map((g) => ({ o: g.o, w: g.p / g.rows }));
+  const perItem = [...groups.values()].map((g) => ({ o: g.o, w: g.p }));
   const wsum = perItem.reduce((a, x) => a + x.w, 0) || 1;
 
   let ev = 0;

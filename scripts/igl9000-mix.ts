@@ -42,6 +42,7 @@ import { valueContract, type CandidateContract, type ValuedContract } from "@/li
 import { floatToWear } from "@/lib/tradeup";
 import { steamMarket } from "@/lib/steam-market";
 import { pAhead, ventureKey, type Venture, type VentureInput, type VentureOutcome } from "@/lib/ventures";
+import { splitPhases } from "@/lib/doppler";
 import { writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
@@ -89,6 +90,9 @@ const SHOCK = 0.3;
 const skins: Skin[] = loadSkins();
 const prices: PriceTable = loadPrices();
 const skinById = new Map(skins.map((s) => [s.id, s]));
+// catalog entries per Doppler name, one per phase
+const phaseRows = new Map<string, Skin[]>();
+for (const s of skins) if (s.phase) phaseRows.set(s.name, [...(phaseRows.get(s.name) ?? []), s]);
 // The market-avg quote excludes Steam, so with one other venue its dispersion
 // guard never fires and a single stale Skinport listing ($334 vs Steam's $12)
 // becomes a jackpot. Corroborate against Steam before trusting any price.
@@ -713,7 +717,8 @@ function liveCheck(v: ValuedContract): LiveRow {
     collections: [...new Set(vInputs.map((i) => i.collection))],
     venue: "steam",
     inputs: vInputs,
-    outcomes: vOutcomes.sort((a, b) => (b.value ?? 0) - (a.value ?? 0)),
+    // a weapon Doppler is one Steam item: its phases split the odds and share the price
+    outcomes: vOutcomes.flatMap((o) => splitPhases(o, phaseRows.get(o.name) ?? [])).sort((a, b) => (b.value ?? 0) - (a.value ?? 0)),
     float: { adjusted: T, sum: T * n, max: tMax * n, firstChange: first },
     cost,
     value: liquidEv,

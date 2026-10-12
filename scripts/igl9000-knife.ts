@@ -8,9 +8,9 @@
  * outcomes are priced from the Buff163 and CSFloat feeds, per phase:
  *   fast sale    = top buy order × (1 − fee)        (ranking value)
  *   patient sale = lowest ask × (1 − fee), or the buy order when ask > 3× it
- * A Doppler's share is split evenly across its phases (7 for Doppler, 5 for Gamma
- * Doppler). Real drop rates for the rare phases are unknown and probably lower,
- * so the even split is an upper bound on their value.
+ * Each Doppler phase is its own outcome: the knife's share is split across its
+ * phases by the estimated phase odds in lib/doppler.ts (Valve publishes none),
+ * and each phase is priced at its own feed price.
  *
  * Contracts: 5 Coverts from one collection (collections that share a knife pool,
  * like Gamma and Gamma 2, give the same odds). For every average normalized
@@ -29,6 +29,7 @@ import { FEEDS, loadFeed, quoteOf } from "@/lib/third-party-feeds";
 import { buildPools, colsOf, knifeValuer, type Pool, type Value } from "@/lib/igl9000-knife";
 import { steamMarket } from "@/lib/steam-market";
 import { pAhead as ventureAhead, ventureKey, type Venture, type VentureInput, type VentureOutcome } from "@/lib/ventures";
+import { isGem, phaseShares, withPhase } from "@/lib/doppler";
 import { writeFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
@@ -57,6 +58,9 @@ const short = (n: string) => n.replace(/^The /, "").replace(/ Collection$/, "");
 
 const { valueOf } = knifeValuer(tables, FEE);
 const pools = buildPools(skins);
+// the catalog entry for each Doppler phase, by name, for its picture and id
+const phaseRows = new Map<string, Skin[]>();
+for (const s of skins) if (s.phase) phaseRows.set(s.name, [...(phaseRows.get(s.name) ?? []), s]);
 
 const steamFeed = (s: Skin, wear: string) => {
   const v = prices[`${s.id}|${wear}|norm`]?.sources?.steam;
@@ -88,7 +92,7 @@ function inputsAt(p: Pool, T: number): { cash: Input | null; steam: Input | null
   return { cash, steam };
 }
 
-interface Outcome { knife: Skin; wear: Wear; float: number; p: number; v: Value }
+interface Outcome { knife: Skin; phase?: string; wear: Wear; float: number; p: number; v: Value }
 interface Contract { pool: Pool; T: number; cash: Input; steam: Input | null; outcomes: Outcome[]; evFast: number; evPatient: number; costCash: number }
 
 const contracts: Contract[] = [];
@@ -111,7 +115,16 @@ for (const p of pools.values()) {
       const wear = floatToWear(float);
       const v = valueOf(k, wear);
       if (v.fast == null) { ok = false; break; }
-      outcomes.push({ knife: k, wear, float, p: 1 / p.knives.length, v });
+      if (!v.phases) {
+        outcomes.push({ knife: k, wear, float, p: 1 / p.knives.length, v });
+        continue;
+      }
+      // a Doppler: one outcome per phase, its share of the knife's 1/k
+      const share = phaseShares(v.phases.map((x) => x.phase));
+      for (const ph of v.phases) {
+        const row = phaseRows.get(k.name)?.find((r) => r.phase === ph.phase) ?? k;
+        outcomes.push({ knife: row, phase: ph.phase, wear, float, p: share.get(ph.phase)! / p.knives.length, v: { fast: ph.fast, patient: ph.patient } });
+      }
     }
     if (!ok) continue;
     const evFast = outcomes.reduce((a, o) => a + o.p * o.v.fast!, 0);
@@ -157,7 +170,7 @@ function pAhead(c: Contract, cost: number, n: number): number {
 
 const market = VERIFY > 0 ? steamMarket({ gapMs: Number(arg("steam-gap") ?? 8) * 1000 }) : null;
 
-console.log(`\nIGL-9000 · Covert ×5 → knife sweep   outcomes: Buff163 + CSFloat feeds, fee ${pct(FEE)}   Doppler phases split evenly (upper bound for rare phases)`);
+console.log(`\nIGL-9000 · Covert ×5 → knife sweep   outcomes: Buff163 + CSFloat feeds, fee ${pct(FEE)}   Doppler phases as separate outcomes at estimated phase odds`);
 console.log(`  pools ${pools.size} → contracts ${contracts.length} → distinct knife pools ${byPool.size}, top ${ranked.length} by cash-in, cash-out RTP\n`);
 
 ranked.forEach((c, i) => {
@@ -171,7 +184,7 @@ ranked.forEach((c, i) => {
   );
   console.log(
     `    P(profit) ${pct(pWin)}   P(ahead) after 2: ${pct(pAhead(c, c.costCash, 2))}  after 5: ${pct(pAhead(c, c.costCash, 5))}` +
-      `   best ${top[0].knife.name} (${ABBR[top[0].wear]}) ${money(top[0].v.fast!)}`,
+      `   best ${withPhase(top[0].knife.name, top[0].phase)} (${ABBR[top[0].wear]}) ${money(top[0].v.fast!)}`,
   );
   const s = c.steam;
   console.log(
@@ -179,14 +192,10 @@ ranked.forEach((c, i) => {
       (s ? `   | Steam: 5× ${s.skin.name} (${ABBR[s.wear]}) feed ${money(s.steam!)} ea → ${money(5 * s.steam!)}, ${((c.evFast / (5 * s.steam!)) * 100).toFixed(0)}% cash per Steam $` : ""),
   );
   for (const o of top.slice(0, 4)) {
-    const rare = o.v.phases?.filter((ph) => !ph.phase.startsWith("Phase")).map((ph) => `${ph.phase} ${money(ph.fast ?? 0)}`).join(", ");
-    console.log(`      ${pct(o.p).padStart(5)}  ${money(o.v.fast!).padStart(10)}  ${o.knife.name} (${ABBR[o.wear]} ${o.float.toFixed(4)})${rare ? `   phases avg, rare: ${rare}` : ""}`);
+    console.log(`      ${pct(o.p).padStart(5)}  ${money(o.v.fast!).padStart(10)}  ${withPhase(o.knife.name, o.phase)} (${ABBR[o.wear]} ${o.float.toFixed(4)})`);
   }
-  const rareEv = c.outcomes.reduce((a, o) => {
-    const ph = o.v.phases?.filter((x) => !x.phase.startsWith("Phase")) ?? [];
-    return a + o.p * ph.reduce((b, x) => b + (x.fast ?? 0), 0) / (o.v.phases?.length ?? 1);
-  }, 0);
-  if (rareEv > 0) console.log(`    rare Doppler phases add ${money(rareEv)} of the EV at the even split`);
+  const rareEv = c.outcomes.reduce((a, o) => a + (o.phase && isGem(o.phase) ? o.p * o.v.fast! : 0), 0);
+  if (rareEv > 0) console.log(`    gem Doppler phases add ${money(rareEv)} of the EV at the estimated phase odds`);
 
   // Steam listings under the cash input's float cap: what it costs in Steam
   // balance, and whether that float exists at all in the numbers needed
@@ -228,7 +237,7 @@ function toVenture(c: Contract, pWin: number, rareEv: number, book: { listings: 
       name: o.knife.name, skinId: o.knife.id, collection: c.pool.name, rarity: o.knife.rarity.name,
       probability: o.p, float: o.float, wear: o.wear, skinMin: o.knife.min_float, skinMax: o.knife.max_float,
       value: o.v.fast, checked: true, sold24h: null, win: (o.v.fast ?? 0) > cost,
-      ...(o.v.phases ? { rarePhases: o.v.phases.filter((p) => !p.phase.startsWith("Phase")).map((p) => ({ phase: p.phase, value: p.fast })) } : {}),
+      ...(o.phase ? { phase: o.phase } : {}),
     }))
     .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
   const short_ = checked && book != null && book.listings.length < N;
@@ -258,13 +267,13 @@ function toVenture(c: Contract, pWin: number, rareEv: number, book: { listings: 
     backPerDollar: c.evFast / cost,
     pProfit: premium ? c.outcomes.filter((o) => o.v.fast! > cost).reduce((a, o) => a + o.p, 0) : pWin,
     pAhead: ventureAhead(c.outcomes.map((o) => ({ p: o.p, v: o.v.fast! })), cost),
-    best: { name: outcomes[0].name, wear: outcomes[0].wear, value: outcomes[0].value ?? 0, probability: outcomes[0].probability },
+    best: { name: withPhase(outcomes[0].name, outcomes[0].phase), wear: outcomes[0].wear, value: outcomes[0].value ?? 0, probability: outcomes[0].probability },
     rareShare: rareEv > 0 ? rareEv / c.evFast : null,
     verdict: short_ ? "short" : !checked ? "model" : c.evFast > cost ? "holds" : "dead",
     warnings: [
       ...(premium ? [`at this float the inputs cost ${Math.round((steamEach! / x.cash!) * 10) / 10}× the float-blind ask (Steam listings), so they're priced at the listings`] : []),
       ...(short_ ? [`Steam has ${book!.listings.length} of 5 ${x.skin.name} under ${x.cap.toFixed(3)}: the float cap is a collector float`] : []),
-      ...(rareEv > 0 ? [`rare Doppler phases are ${((rareEv / c.evFast) * 100).toFixed(0)}% of the value at an even phase split; real drop rates are likely lower`] : []),
+      ...(rareEv > 0 ? [`gem Doppler phases (Ruby, Sapphire, Black Pearl, Emerald) are ${((rareEv / c.evFast) * 100).toFixed(0)}% of the value at estimated phase odds; Valve publishes none`] : []),
       ...(premium ? [] : ["inputs priced at the third-party lowest ask, which ignores float"]),
       "knife values at the top buy order on Buff163 / CSFloat; selling on Steam is capped near $1,800",
     ],

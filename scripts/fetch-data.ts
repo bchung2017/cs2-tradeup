@@ -47,6 +47,7 @@ interface RawSkin {
   souvenir?: boolean;
   collections?: { id: string; name: string; image?: string }[];
   image?: string;
+  phase?: string;
 }
 
 interface RawCrate {
@@ -106,6 +107,7 @@ async function main() {
       souvenir: false,
       collections: (s.collections ?? []).map((c) => ({ id: c.id, name: c.name, image: c.image })),
       image: s.image,
+      ...(s.phase ? { phase: s.phase } : {}),
     }));
 
   // Gold tier: knives/gloves re-linked to their case collections above. Rarity
@@ -125,6 +127,7 @@ async function main() {
       souvenir: false,
       collections: [...goldCollections.get(s.id)!.values()],
       image: s.image,
+      ...(s.phase ? { phase: s.phase } : {}),
     }));
 
   const skins: Skin[] = [...weaponSkins, ...goldSkins];
