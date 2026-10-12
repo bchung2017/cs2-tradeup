@@ -4,8 +4,8 @@
 // every contract your inventory can start (My Ventures, `mine`), as a list you
 // can cut down and reorder. Filter and sort state lives in the URL, so a view
 // can be shared.
-import { useMemo } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import type { ExpiredFile, Venture, VenturesFile } from "@/lib/ventures";
 import { ago, TIER_SHORT } from "@/lib/venture-copy";
 import { useNow, useTracked } from "@/lib/venture-store";
@@ -49,18 +49,24 @@ export default function MarketList({
   images: Record<string, string>;
   mine?: boolean; // every row already uses your inventory
 }) {
-  const params = useSearchParams();
-  const router = useRouter();
+  // Filter state lives here, seeded from the URL once; every change is mirrored
+  // back to the URL in place so a view can still be shared or reloaded. Reading
+  // it back through useSearchParams didn't refresh after the change.
+  const initial = useSearchParams();
+  const [params, setParams] = useState(() => new URLSearchParams(initial.toString()));
   const pathname = usePathname();
   const { tracked, toggle } = useTracked();
   const { plans, owned } = useVenturePlans(data.ventures);
 
   const get = (k: string, d = "") => params.get(k) ?? d;
+  // (router.replace, used before, needed a server round trip that committed a
+  // change late or never, so the controls snapped back.)
   const set = (k: string, v: string) => {
-    const p = new URLSearchParams(params.toString());
+    const p = new URLSearchParams(params);
     if (v) p.set(k, v);
     else p.delete(k);
-    router.replace(`${pathname}${p.size ? `?${p}` : ""}`, { scroll: false });
+    setParams(p);
+    window.history.replaceState(window.history.state, "", `${pathname}${p.size ? `?${p}` : ""}`);
   };
 
   const q = get("q").toLowerCase();
