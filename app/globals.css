@@ -417,6 +417,10 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 }
 @media (max-width: 420px) {
   .rail-brand { display: none; }
+  /* five tabs on a phone: tighter spacing so PROFILE stays on screen */
+  .rail { gap: 0; padding: 0 4px; }
+  .rail-link { padding: 0 5px; font-size: 11px; letter-spacing: 0.04em; }
+  .rail-caret { margin-left: 2px; }
 }
 
 /* ── owned: a skin that comes from your inventory glows in its rarity color
