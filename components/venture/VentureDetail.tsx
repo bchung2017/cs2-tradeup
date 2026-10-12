@@ -4,7 +4,7 @@
 // watch out for.
 import type { Venture } from "@/lib/ventures";
 import { rarityHex } from "@/lib/display";
-import { abbr, money, oneIn, pct, ventureLine, VERDICT } from "@/lib/venture-copy";
+import { abbr, backShort, money, oneIn, pct, ventureLine, VERDICT } from "@/lib/venture-copy";
 import { BudgetBar, OutcomeBar } from "./FloatBar";
 import Ago from "./Ago";
 import Handoff from "./Handoff";
@@ -24,6 +24,22 @@ export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | n
     <div className="vx-detail">
       <p className="vx-igl"><span className="vx-igl__tag">IGL</span> {ventureLine(v)}</p>
       <Handoff plan={plan} />
+
+      <section>
+        <h4 className="hud">Per contract</h4>
+        <div className="vx-ahead">
+          <div><b>{money(v.cost)}</b><span className="dim">entry</span></div>
+          <div><b>{money(v.value)}</b><span className="dim">average pull sells for</span></div>
+          <div title="Average sale value of one pull for every $1 the inputs cost">
+            <b className={v.backPerDollar >= 1 ? "pos" : v.backPerDollar >= 0.85 ? "" : "neg"}>{backShort(v.backPerDollar)}</b>
+            <span className="dim">back per $1</span>
+          </div>
+          <div title="Chance one pull sells for more than the entry (not the grand prize odds)">
+            <b>{pct(v.pProfit)}</b>
+            <span className="dim">profit chance</span>
+          </div>
+        </div>
+      </section>
 
       <section>
         <h4 className="hud">Buy · {v.size} inputs · {v.venue === "steam" ? "Steam" : "third-party cash"}</h4>

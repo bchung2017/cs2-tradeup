@@ -1,12 +1,12 @@
 "use client";
 
 // One contract, collapsed to a line you can scan: what goes in, what it costs,
-// how much comes back, every outcome's odds as a donut with the four best, the float budget, freshness and
+// every outcome's odds as a donut with the four best, the float budget, freshness and
 // the verdict. Click to open the full recipe.
 import { useState } from "react";
 import type { Venture } from "@/lib/ventures";
 import { rarityHex } from "@/lib/display";
-import { abbr, backShort, money, pct, TIER_SHORT, VERDICT } from "@/lib/venture-copy";
+import { abbr, money, TIER_SHORT, VERDICT } from "@/lib/venture-copy";
 import VentureDetail from "./VentureDetail";
 import Ago from "./Ago";
 import { isReady, type Plan } from "@/lib/venture-fit";
@@ -58,8 +58,6 @@ export default function VentureRow({
         </div>
 
         <div className="vx-num vx-num--cost"><b>{money(v.cost)}</b><span className="dim">entry</span></div>
-        <div className="vx-num vx-num--back"><b className={v.backPerDollar >= 1 ? "pos" : v.backPerDollar >= 0.85 ? "" : "neg"}>{backShort(v.backPerDollar)}</b><span className="dim">back per $1</span></div>
-        <div className="vx-num vx-num--pays" title="Chance the outcome sells for more than the entry (not the grand prize odds)"><b>{pct(v.pProfit)}</b><span className="dim">profit chance</span></div>
         <div className="vx-jackpot">
           <OutcomePie v={v} />
         </div>

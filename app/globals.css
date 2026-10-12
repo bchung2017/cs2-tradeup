@@ -252,7 +252,7 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-row.is-open { border-color: var(--green-dim); }
 .vx-line {
   display: grid; align-items: center; gap: 12px; padding: 10px 12px; cursor: pointer;
-  grid-template-columns: 24px 110px minmax(220px, 1fr) 80px 80px 80px 230px 100px 110px;
+  grid-template-columns: 24px 110px minmax(220px, 1fr) 80px 230px 100px 110px;
 }
 .vx-line:hover { background: var(--surface-2); }
 .vx-star { background: none; border: none; color: var(--fg-faint); font-size: 16px; padding: 0; cursor: pointer; }
@@ -305,6 +305,8 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-ahead { display: flex; gap: 24px; }
 .vx-ahead > div { display: flex; flex-direction: column; gap: 2px; font-size: 10px; }
 .vx-ahead b { font-size: 18px; color: var(--fg); }
+.vx-ahead b.pos { color: var(--profit); }
+.vx-ahead b.neg { color: var(--loss); }
 .vx-warn { margin: 0; padding-left: 16px; font-size: 12px; color: var(--fg-dim); line-height: 1.6; }
 .vx-meta { margin: 0; font-size: 10px; color: var(--fg-faint); }
 
@@ -330,14 +332,13 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 @keyframes vx-in { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 @media (max-width: 1100px) {
-  .vx-line { grid-template-columns: 24px minmax(0, 1fr) 84px 84px 72px; }
+  .vx-line { grid-template-columns: 24px minmax(0, 1fr) 84px; }
   .vx-tiers, .vx-room, .vx-fresh { display: none; }
   .vx-jackpot { grid-column: 2 / -1; }
 }
 @media (max-width: 720px) {
   .pane--venture { padding: 16px 12px 48px; }
-  .vx-line { grid-template-columns: 24px minmax(0, 1fr) 68px 44px; gap: 8px; }
-  .vx-num--pays { display: none; }
+  .vx-line { grid-template-columns: 24px minmax(0, 1fr) 68px; gap: 8px; }
   .vx-grid2 { grid-template-columns: 1fr; }
   .vx-red__opts li { grid-template-columns: 24px 1fr 70px; }
   .vx-red__opts li > :nth-child(n+4) { display: none; }
