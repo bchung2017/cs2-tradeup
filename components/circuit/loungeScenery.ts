@@ -3,7 +3,7 @@
 //   rock face   behind the pond, about eye height, jagged low-poly blocks
 //   waterfall   off the rock lip into the pond: streaming sheet, foam, mist
 //   bonsai      a large twisting tree growing out of the side of the rock
-//   patio       a brick terrace on the right with a bench facing the water
+//   patio       a hex-tiled terrace on the right with a bench facing the water
 //   ramp        an S-curved stone ramp from the patio, across the pond between
 //               the waterfall and the koi, up to the rock top; over the water
 //               it stands on an aqueduct wall with a semicircular arch
@@ -327,20 +327,39 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   }
   group.add(tree);
 
-  // ── patio, brick terrace and bench ───────────────────────────────────────
-  const brickTex = (() => {
+  // ── patio, hex-tiled terrace and bench ───────────────────────────────────────
+  // hexagonal tiles: one repeat is 4 columns x 2 rows of flat-topped hexes,
+  // dark stone with a slight shade per tile, on green grout
+  const HEX_TILE_W = 3.0; // world units per repeat, across (4 columns of hexes)
+  const HEX_TILE_H = HEX_TILE_W * (2 * Math.sqrt(3)) / 6; // keeps the hexes regular
+  const tileTex = (() => {
+    const r = 32, W2 = 6 * r, H2 = 112;
     const c = document.createElement("canvas");
-    c.width = c.height = 256;
+    c.width = W2;
+    c.height = H2;
     const g = c.getContext("2d")!;
-    g.fillStyle = "#0a1a0e";
-    g.fillRect(0, 0, 256, 256);
-    g.strokeStyle = "rgba(51,255,51,0.55)";
-    g.lineWidth = 2;
-    const bh = 32, bw = 64;
-    for (let row = 0; row < 256 / bh; row++) {
-      g.beginPath(); g.moveTo(0, row * bh); g.lineTo(256, row * bh); g.stroke();
-      const off = row % 2 ? bw / 2 : 0;
-      for (let x = off; x < 256 + bw; x += bw) { g.beginPath(); g.moveTo(x, row * bh); g.lineTo(x, row * bh + bh); g.stroke(); }
+    g.fillStyle = "#1c5c26"; // grout
+    g.fillRect(0, 0, W2, H2);
+    g.scale(1, H2 / (2 * Math.sqrt(3) * r)); // fit two hex rows exactly
+    const shades = ["#0a1a0e", "#0c1f11", "#08160c", "#0e2213", "#091b0f"];
+    for (let i = -1; i <= 4; i++) {
+      for (let j = -1; j <= 2; j++) {
+        const cx = i * 1.5 * r;
+        const cy = j * Math.sqrt(3) * r + (((i % 2) + 2) % 2 ? (Math.sqrt(3) * r) / 2 : 0);
+        g.beginPath();
+        for (let k = 0; k < 6; k++) {
+          const a = (k * Math.PI) / 3;
+          const x = cx + Math.cos(a) * r * 0.9, y = cy + Math.sin(a) * r * 0.9;
+          if (k) g.lineTo(x, y); else g.moveTo(x, y);
+        }
+        g.closePath();
+        // the shade repeats with the tile, so the seams stay invisible
+        g.fillStyle = shades[(((((i % 4) + 4) % 4) * 7 + (((j % 2) + 2) % 2) * 3) % shades.length)];
+        g.fill();
+        g.strokeStyle = "rgba(51,255,51,0.35)";
+        g.lineWidth = 1.5;
+        g.stroke();
+      }
     }
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
@@ -349,11 +368,19 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   })();
   const patio = new THREE.Group();
   const pw = 6.2 * sc, pz0 = -2.2, pd = D / 2 + 0.35 - pz0;
-  const topTex = brickTex.clone(); topTex.repeat.set(pw / 1.2, pd / 1.2); topTex.needsUpdate = true; keep(topTex);
-  const sideTex = brickTex.clone(); sideTex.repeat.set(pw / 1.2, 1); sideTex.needsUpdate = true; keep(sideTex);
+  const tiles = (across: number, high: number) => {
+    const t = keep(tileTex.clone());
+    t.repeat.set(across / HEX_TILE_W, high / HEX_TILE_H);
+    t.needsUpdate = true;
+    return t;
+  };
+  const faceH = rim + 0.6;
+  const topTex = tiles(pw, pd);
+  const sideTex = tiles(pw, faceH); // front and back faces
+  const endTex = tiles(pd, faceH); // the narrow ends
   const terrace = solid(new THREE.BoxGeometry(pw, rim + 0.6, pd), [
-    keep(new THREE.MeshLambertMaterial({ map: sideTex })),
-    keep(new THREE.MeshLambertMaterial({ map: sideTex })),
+    keep(new THREE.MeshLambertMaterial({ map: endTex })),
+    keep(new THREE.MeshLambertMaterial({ map: endTex })),
     keep(new THREE.MeshLambertMaterial({ map: topTex })),
     darkStone,
     keep(new THREE.MeshLambertMaterial({ map: sideTex })),
@@ -361,8 +388,8 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   ] as unknown as THREE.Material);
   terrace.position.set(px0 + pw / 2, (rim - 0.6) / 2, pz0 + pd / 2);
   patio.add(terrace);
-  // a low brick step down along the front
-  const step = solid(new THREE.BoxGeometry(pw, 0.45, 0.8), keep(new THREE.MeshLambertMaterial({ map: sideTex })));
+  // a low tiled step down along the front
+  const step = solid(new THREE.BoxGeometry(pw, 0.45, 0.8), keep(new THREE.MeshLambertMaterial({ map: tiles(pw, 0.8) })));
   step.position.set(px0 + pw / 2, 0.22 - 0.6 + 0.45, D / 2 + 0.35 + 0.4);
   patio.add(step);
   // bench facing the pond
@@ -601,7 +628,7 @@ function bake(root: THREE.Object3D, keep: <T extends { dispose(): void }>(x: T) 
       lines.set(m, [...(lines.get(m) ?? []), g]);
     }
   });
-  // textured meshes (the brick terrace) stay as they are, lit per vertex
+  // textured meshes (the tiled terrace) stay as they are, lit per vertex
   for (const m of keepMeshes) {
     const mesh = m as THREE.Mesh;
     m.updateMatrixWorld(true);
