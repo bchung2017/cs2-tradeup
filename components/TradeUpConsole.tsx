@@ -179,7 +179,7 @@ export default function TradeUpConsole() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <span className="hud">{String(i + 1).padStart(2, "0")}</span>
               {owned ? (
-                <span className="owned-tag" title="this copy is in your inventory">yours</span>
+                <span className="owned-tag" title="this copy is in your inventory">owned</span>
               ) : slot.skin && slot.origin === "buy" ? (
                 <span className="hud" title="to buy at or under this float" style={{ fontSize: 8, color: "var(--cream-dim)" }}>BUY</span>
               ) : null}

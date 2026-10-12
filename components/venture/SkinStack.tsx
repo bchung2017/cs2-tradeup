@@ -57,7 +57,7 @@ export default function SkinStack({ items, size = 44 }: { items: StackItem[]; si
           style={{ width: size, borderBottomColor: rarityHex(it.rarity), ["--glow" as string]: rarityHex(it.rarity) }}
           title={`${it.count}× ${it.name}${it.note ? ` (${it.note})` : ""}${it.mine ? " · in your inventory" : ""}`}
         >
-          {it.mine && <span className="owned-tag">yours</span>}
+          {it.mine && <span className="owned-tag">owned</span>}
           <Thumb src={images[it.imageKey ?? it.key] ?? it.image} alt={it.name} w={size} h={Math.round(size * 0.75)} />
           <figcaption className="vx-skin__count">×{it.count}</figcaption>
         </figure>
@@ -76,14 +76,14 @@ export function Thumb({ src, alt, w, h }: { src?: string; alt: string; w: number
 }
 
 // Every slot of the contract as its own picture, 5 or 10 of them; the copies
-// you own glow, with one tag saying how many are yours.
+// you own glow, with one tag saying how many are owned.
 export function SlotStrip({ items, size = 38 }: { items: StackItem[]; size?: number }) {
   const images = useImages();
   const slots = items.flatMap((it) => Array.from({ length: it.count }, (_, k) => ({ it, k })));
   const mine = items.filter((it) => it.mine).reduce((a, it) => a + it.count, 0);
   return (
     <div className="vx-strip">
-      {mine > 0 && <span className="owned-tag" style={{ ["--glow" as string]: rarityHex(items.find((it) => it.mine)?.rarity) }}>{mine} yours</span>}
+      {mine > 0 && <span className="owned-tag" style={{ ["--glow" as string]: rarityHex(items.find((it) => it.mine)?.rarity) }}>{mine} owned</span>}
       <div className="vx-strip__slots">
         {slots.map(({ it, k }) => (
           <figure

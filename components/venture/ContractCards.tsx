@@ -43,7 +43,7 @@ export function InputCards({ v, plan }: { v: Venture; plan?: Plan | null }) {
           >
             <header className="vx-card__chips">
               {o
-                ? <span className="vx-chip-pill is-mine">yours</span>
+                ? <span className="vx-chip-pill is-mine">owned</span>
                 : <span className="vx-chip-pill" title={BASIS[i.basis]}>{money(i.priceEach)}</span>}
               <span className="vx-chip-pill">{abbr(o?.wear ?? i.wear)}</span>
             </header>
