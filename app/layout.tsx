@@ -3,6 +3,7 @@ import "./globals.css";
 import { TradeupProvider } from "@/lib/tradeup-context";
 import TopRail from "@/components/TopRail";
 import CircuitBoard from "@/components/CircuitBoard";
+import LoungeBackdrop from "@/components/LoungeBackdrop";
 import VentureToast from "@/components/VentureToast";
 import RegisterSW from "@/components/RegisterSW";
 
@@ -44,6 +45,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Shared background behind every surface; lives in the layout so it
             never remounts on navigation. */}
         <CircuitBoard />
+        <LoungeBackdrop />
         <TradeupProvider>
           <TopRail />
           {children}

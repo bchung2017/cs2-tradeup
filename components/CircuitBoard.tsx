@@ -22,13 +22,17 @@ interface Props {
 
 export default function CircuitBoard({ intensity = 0.15, surge = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const handleRef = useRef<{ setLive(i: number, s: boolean): void; destroy(): void } | null>(null);
+  const handleRef = useRef<{ setLive(i: number, s: boolean): void; setPaused(on: boolean): void; destroy(): void } | null>(null);
 
   useEffect(() => {
     if (!canvasRef.current) return;
     const handle = isTouch() ? initCircuitLite(canvasRef.current) : initCircuitKoi(canvasRef.current);
     handleRef.current = handle;
+    // the Lounge's 3D scene says when it fully covers this one
+    const onCover = (e: Event) => handle.setPaused((e as CustomEvent<boolean>).detail);
+    window.addEventListener("lounge:cover", onCover);
     return () => {
+      window.removeEventListener("lounge:cover", onCover);
       handle.destroy();
       handleRef.current = null;
     };

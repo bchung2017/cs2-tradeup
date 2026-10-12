@@ -63,6 +63,24 @@ function VentureMenu({ pathname, badge }: { pathname: string; badge: number }) {
   );
 }
 
+// The Lounge is in preview: its tab shows once a page is opened with ?bg=iso
+// (and stays, per browser, until one is opened with ?bg=flat).
+const PREVIEW_KEY = "lounge:preview";
+function useLoungePreview() {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    try {
+      const bg = new URLSearchParams(location.search).get("bg");
+      if (bg === "iso") localStorage.setItem(PREVIEW_KEY, "1");
+      if (bg === "flat") localStorage.removeItem(PREVIEW_KEY);
+      setOn(localStorage.getItem(PREVIEW_KEY) === "1");
+    } catch {
+      // storage blocked: no preview tab
+    }
+  }, []);
+  return on;
+}
+
 export default function TopRail() {
   const pathname = usePathname();
   const { steamid } = useTradeup();
@@ -87,6 +105,7 @@ export default function TopRail() {
   }, [steamid]);
 
   const onProfile = pathname === "/profile";
+  const lounge = useLoungePreview();
 
   return (
     <nav className="rail">
@@ -98,6 +117,7 @@ export default function TopRail() {
         <VentureMenu pathname={pathname} badge={ventureBadge} />
         <SurfaceLink href="/simulator" label="SIMULATOR" active={pathname === "/simulator"} />
         <SurfaceLink href="/inventory" label="INVENTORY" active={pathname === "/inventory"} />
+        {lounge && <SurfaceLink href="/lounge" label="LOUNGE" active={pathname === "/lounge"} />}
       </div>
 
       <Link href="/profile" className={`rail-link rail-profile${onProfile ? " is-active" : ""}`} aria-current={onProfile ? "page" : undefined}>

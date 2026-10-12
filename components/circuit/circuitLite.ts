@@ -27,7 +27,8 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
   const live = { intensity: 0.15, surge: false };
   let stopped = false;
   let raf = 0;
-  if (!ctx) return { setLive() {}, destroy() {} };
+  if (!ctx) return { setLive() {}, setPaused() {}, destroy() {} };
+  let paused = false; // covered by the Lounge: skip drawing, keep the loop
 
   const base = document.createElement("canvas"); // substrate + dim traces + resting vias
   const glow = document.createElement("canvas"); // blurred halo, blitted at a breathing alpha
@@ -200,7 +201,7 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
   function frame(now: number) {
     if (stopped) return;
     raf = requestAnimationFrame(frame);
-    if (now - last < 1000 / FPS - 2) return;
+    if (paused || now - last < 1000 / FPS - 2) return;
     last = now;
     draw(now / 1000);
   }
@@ -239,6 +240,9 @@ export function initCircuitLite(canvas: HTMLCanvasElement) {
   for (const c of [canvas, base, glow, lit]) c.addEventListener("contextrestored", onRestored);
 
   return {
+    setPaused(on: boolean) {
+      paused = on;
+    },
     setLive(intensity: number, surge: boolean) {
       live.intensity = intensity;
       live.surge = surge;
