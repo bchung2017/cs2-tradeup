@@ -39,10 +39,14 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   const keep = <T extends { dispose(): void }>(x: T) => (disposables.push(x), x);
   const rand = rng(9000);
 
-  const stone = keep(new THREE.MeshLambertMaterial({ color: 0x0c1a12, flatShading: true }));
-  const darkStone = keep(new THREE.MeshLambertMaterial({ color: 0x08120c, flatShading: true }));
-  const leaf = keep(new THREE.MeshLambertMaterial({ color: 0x0d3a1c, flatShading: true, emissive: 0x041a08 }));
-  const bark = keep(new THREE.MeshLambertMaterial({ color: 0x1a1408, flatShading: true }));
+  // each solid has two looks: the phosphor one (dark, edges glowing) seen
+  // while the camera tilts, and a filled one (`userData.fill`, lit like the
+  // campus) it blends into for the Lounge itself
+  const filled = <T extends THREE.Material>(m: T, fill: number) => ((m.userData.fill = fill), m);
+  const stone = keep(filled(new THREE.MeshLambertMaterial({ color: 0x0c1a12, flatShading: true }), 0x66736c));
+  const darkStone = keep(filled(new THREE.MeshLambertMaterial({ color: 0x08120c, flatShading: true }), 0x535f58));
+  const leaf = keep(filled(new THREE.MeshLambertMaterial({ color: 0x0d3a1c, flatShading: true, emissive: 0x041a08 }), 0x2e7a36));
+  const bark = keep(filled(new THREE.MeshLambertMaterial({ color: 0x1a1408, flatShading: true }), 0x4a3a24));
   const edge = keep(new THREE.LineBasicMaterial({ color: GREEN, transparent: true, opacity: 0.85 }));
   const edgeDim = keep(new THREE.LineBasicMaterial({ color: DIM_GREEN, transparent: true, opacity: 0.6 }));
   const edgeMats = [edge, edgeDim];
@@ -479,7 +483,7 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
     geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     geo.setIndex(idx);
     geo.computeVertexNormals();
-    const deckMat = keep(new THREE.MeshLambertMaterial({ color: 0x1a3524, side: THREE.DoubleSide }));
+    const deckMat = keep(filled(new THREE.MeshLambertMaterial({ color: 0x1a3524, side: THREE.DoubleSide }), 0x75817a));
     rampMats.push(deckMat);
     const deck = new THREE.Mesh(keep(geo), deckMat);
     group.add(deck);
@@ -537,7 +541,7 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
           pa.setXYZ(v, w.x, pa.getY(v), w.z);
         }
         g.computeVertexNormals();
-        const wallMat = keep(new THREE.MeshLambertMaterial({ color: 0x2f5c3e, side: THREE.DoubleSide }));
+        const wallMat = keep(filled(new THREE.MeshLambertMaterial({ color: 0x2f5c3e, side: THREE.DoubleSide }), 0x68756e));
         rampMats.push(wallMat);
         const wall = solid(g, wallMat, edge, 60);
         group.add(wall);
@@ -573,7 +577,10 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
       for (const [o, delay] of rise) o.scale.y = Math.max(0.001, ease((s - delay) / (1 - delay)));
       // the ramp and aqueduct fade in rather than squash: they span heights
       const rampIn = ease((s - 0.3) / 0.7);
-      for (const m of edgeMats) m.opacity = (m === edge ? 0.85 : 0.6) * ease(s / 0.6);
+      // phosphor while tilting, filled once in: outlines fade to a faint line
+      const fill = fillAt(s);
+      fillU.value = fill;
+      for (const m of edgeMats) m.opacity = (m === edge ? 0.85 : 0.6) * ease(s / 0.6) * (1 - 0.7 * fill);
       for (const mat of rampMats) {
         mat.transparent = rampIn < 1;
         mat.opacity = rampIn;
@@ -609,16 +616,50 @@ const lightAt = (n: THREE.Vector3, out: THREE.Color) =>
 
 // Write lit vertex colours into a (non-indexed, flat-normal) geometry whose
 // positions are already in the space the light is defined in.
-function paint(geo: THREE.BufferGeometry, base: (vertex: number) => THREE.Color, emissive?: THREE.Color) {
+// `color2` holds the filled look: the campus's lighting on the material's
+// fill colour.
+function paint(geo: THREE.BufferGeometry, base: (vertex: number) => THREE.Color, emissive: THREE.Color | undefined, fill: (vertex: number) => THREE.Color) {
   geo.computeVertexNormals();
-  const n = geo.attributes.normal, col = new Float32Array(n.count * 3);
+  const n = geo.attributes.normal, col = new Float32Array(n.count * 3), col2 = new Float32Array(n.count * 3);
   const v = new THREE.Vector3(), c = new THREE.Color();
   for (let i = 0; i < n.count; i++) {
     lightAt(v.fromBufferAttribute(n, i).normalize(), c).multiply(base(i));
     if (emissive) c.add(emissive);
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    const k = 0.4 + 0.35 * (0.5 * v.y + 0.5) + 0.4 * Math.max(0, v.dot(KEY_DIR));
+    c.copy(fill(i)).multiplyScalar(k);
+    col2[i * 3] = c.r; col2[i * 3 + 1] = c.g; col2[i * 3 + 2] = c.b;
   }
   geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  geo.setAttribute("color2", new THREE.BufferAttribute(col2, 3));
+}
+// A plain solid (the pond's walls) given both looks: `dark` lit like the
+// scenery, `fill` lit like the campus. Returns a non-indexed copy.
+export function paintBoth(geo: THREE.BufferGeometry, dark: THREE.Color, fill: THREE.Color) {
+  const g = geo.index ? geo.toNonIndexed() : geo.clone();
+  paint(g, () => dark, undefined, () => fill);
+  return g;
+}
+const fillOf = (m: THREE.Material) => new THREE.Color(m.userData.fill ?? 0xffffff);
+
+// How far into the filled look at camera progress s, and the uniform every
+// filled material shares.
+export const fillAt = (s: number) => ease((s - 0.45) / 0.55);
+const fillU = { value: 0 };
+export function fillable<T extends THREE.Material>(m: T) {
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uFill = fillU;
+    sh.vertexShader = "attribute vec3 color2;\nuniform float uFill;\n" +
+      sh.vertexShader.replace("#include <color_vertex>", "#include <color_vertex>\n  vColor.rgb = mix(vColor.rgb, color2, uFill);");
+    // textures (the flagstones): their green glow turns to pale stone
+    sh.fragmentShader = "uniform float uFill;\n" + sh.fragmentShader.replace("#include <map_fragment>", `#include <map_fragment>
+  #ifdef USE_MAP
+    float lum = dot(sampledDiffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+    diffuseColor.rgb = mix(diffuseColor.rgb, (vec3(0.16, 0.18, 0.17) + lum * vec3(1.1, 1.2, 1.15)), uFill);
+  #endif`);
+  };
+  m.customProgramCacheKey = () => "fill";
+  return m;
 }
 
 // One Lambert mesh → the same look as an unlit, vertex-coloured material.
@@ -627,11 +668,12 @@ function bakedMaterial(mesh: THREE.Mesh, mat: THREE.MeshLambertMaterial, keep: <
   const geo = (mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone());
   // light in world orientation, then keep the mesh's own transform
   const world = geo.clone().applyMatrix4(new THREE.Matrix4().extractRotation(mesh.matrixWorld));
-  paint(world, () => mat.color, mat.emissive);
+  paint(world, () => mat.color, mat.emissive, () => fillOf(mat));
   geo.setAttribute("color", world.getAttribute("color"));
+  geo.setAttribute("color2", world.getAttribute("color2"));
   world.dispose();
   mesh.geometry = keep(geo);
-  return keep(new THREE.MeshBasicMaterial({ vertexColors: true, map: mat.map, side: mat.side, transparent: mat.transparent, opacity: mat.opacity }));
+  return keep(fillable(new THREE.MeshBasicMaterial({ vertexColors: true, map: mat.map, side: mat.side, transparent: mat.transparent, opacity: mat.opacity })));
 }
 
 // Merge everything under `root` into one lit mesh (plain Lambert solids, by
@@ -654,8 +696,9 @@ function bake(root: THREE.Object3D, keep: <T extends { dispose(): void }>(x: T) 
       const mat = mats[0] as THREE.MeshLambertMaterial;
       const g = (mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone()).applyMatrix4(rel);
       const lightSpace = g.clone().applyMatrix4(rot);
-      paint(lightSpace, () => mat.color, mat.emissive);
+      paint(lightSpace, () => mat.color, mat.emissive, () => fillOf(mat));
       g.setAttribute("color", lightSpace.getAttribute("color"));
+      g.setAttribute("color2", lightSpace.getAttribute("color2"));
       g.deleteAttribute("normal");
       g.deleteAttribute("uv");
       lightSpace.dispose();
@@ -677,11 +720,12 @@ function bake(root: THREE.Object3D, keep: <T extends { dispose(): void }>(x: T) 
     // a box keeps six face groups even with one material: index only into
     // the materials there are
     const matAt = (i: number) => mats.length === 1 ? mats[0] : mats[Math.min(groupOf(i), mats.length - 1)];
-    paint(world, (i) => (matAt(i) as THREE.MeshLambertMaterial).color ?? new THREE.Color(1, 1, 1));
+    paint(world, (i) => (matAt(i) as THREE.MeshLambertMaterial).color ?? new THREE.Color(1, 1, 1), undefined, (i) => fillOf(matAt(i)));
     geo.setAttribute("color", world.getAttribute("color"));
+    geo.setAttribute("color2", world.getAttribute("color2"));
     world.dispose();
     mesh.geometry = keep(geo);
-    mesh.material = mats.map((mm) => keep(new THREE.MeshBasicMaterial({ vertexColors: true, map: (mm as THREE.MeshLambertMaterial).map ?? null })));
+    mesh.material = mats.map((mm) => keep(fillable(new THREE.MeshBasicMaterial({ vertexColors: true, map: (mm as THREE.MeshLambertMaterial).map ?? null }))));
     if (!Array.isArray(mesh.material) || mesh.material.length === 1) mesh.material = (mesh.material as THREE.Material[])[0];
   }
   // rebuild root: the kept textured meshes (re-parented in place), the merged
@@ -697,7 +741,7 @@ function bake(root: THREE.Object3D, keep: <T extends { dispose(): void }>(x: T) 
   if (lit.length) {
     const merged = keep(mergeGeometries(lit)!);
     for (const g of lit) g.dispose();
-    root.add(new THREE.Mesh(merged, keep(new THREE.MeshBasicMaterial({ vertexColors: true }))));
+    root.add(new THREE.Mesh(merged, keep(fillable(new THREE.MeshBasicMaterial({ vertexColors: true })))));
   }
   for (const [m, gs] of lines) {
     const merged = keep(mergeGeometries(gs)!);

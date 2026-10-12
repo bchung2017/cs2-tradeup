@@ -14,7 +14,7 @@
 import * as THREE from "three";
 import { initCircuitLite } from "./circuitLite";
 import { createKoiSchool, makeKoiTexturesAsync } from "./koi2d";
-import { buildScenery, type Scenery } from "./loungeScenery";
+import { buildScenery, fillAt, fillable, paintBoth, type Scenery } from "./loungeScenery";
 import { buildCampus, type Campus } from "./loungeCampus";
 
 const BG = 0x020507;
@@ -132,7 +132,9 @@ export async function createLounge(
 
   // ── basin: walls with glowing edges, rising with the tilt ────────────────
   const basin = new THREE.Group();
-  const wallMat = new THREE.MeshBasicMaterial({ color: 0x050d08 });
+  // walls: dark with glowing edges while tilting, filled stone in the Lounge
+  const wallMat = fillable(new THREE.MeshBasicMaterial({ vertexColors: true }));
+  const WALL_DARK = new THREE.Color(0x050d08).multiplyScalar(2.4), WALL_FILL = new THREE.Color(0x6e7b74);
   const edgeMat = new THREE.LineBasicMaterial({ color: GREEN, transparent: true, opacity: 0.9 });
   scene.add(basin);
   // the rock face, waterfall, bonsai, patio and ramp (loungeScenery.ts),
@@ -160,7 +162,7 @@ export async function createLounge(
     ];
     for (const [x, z, w, d] of walls) {
       const g = new THREE.BoxGeometry(w, RIM, d);
-      const m = new THREE.Mesh(g, wallMat);
+      const m = new THREE.Mesh(paintBoth(g, WALL_DARK, WALL_FILL), wallMat);
       m.position.set(x, RIM / 2, z);
       basin.add(m);
       const lines = new THREE.LineSegments(new THREE.EdgesGeometry(g), edgeMat);
@@ -169,7 +171,7 @@ export async function createLounge(
     }
     // the slab the pond is cut into
     const slab = new THREE.BoxGeometry(W + 2 * t, 0.6, DEPTH + 2 * t);
-    const slabMesh = new THREE.Mesh(slab, wallMat);
+    const slabMesh = new THREE.Mesh(paintBoth(slab, WALL_DARK, WALL_FILL), wallMat);
     slabMesh.position.y = -0.31;
     basin.add(slabMesh);
     const slabEdges = new THREE.LineSegments(new THREE.EdgesGeometry(slab), edgeMat);
@@ -232,7 +234,7 @@ export async function createLounge(
     const corners: THREE.Vector3[] = [];
     for (const box of boxes) for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z));
     // portrait: the pond's long side runs front to back, so look along it
-    POLAR = ((camera.aspect < 1 ? 38 : 50) * Math.PI) / 180;
+    POLAR = ((camera.aspect < 1 ? 46 : 50) * Math.PI) / 180;
     AZIM = ((camera.aspect < 1 ? -16 : -38) * Math.PI) / 180;
     const rail = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rail-h")) || 60;
     const top = 1 - (2 * (rail + 12)) / screenH; // NDC y the scene must stay under
@@ -335,7 +337,7 @@ export async function createLounge(
     // the basin rises out of the slab as the camera tilts
     basin.scale.y = Math.max(0.001, s);
     basin.visible = s > 0.002;
-    edgeMat.opacity = 0.9 * s;
+    edgeMat.opacity = 0.9 * s * (1 - 0.7 * fillAt(s));
     scenery?.update(time, s);
     campus?.update(time, s);
     // fade in over the first part of the move so the hand-off from the flat
