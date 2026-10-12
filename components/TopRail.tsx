@@ -7,8 +7,8 @@ import { useTradeup } from "@/lib/tradeup-context";
 import { useBadge } from "@/lib/venture-store";
 
 const VENTURE_MENU = [
-  { href: "/venture/market", label: "Market Ventures", sub: "what's out there now" },
-  { href: "/venture/mine", label: "My Ventures", sub: "what your inventory starts" },
+  { href: "/venture/market", label: "Market Ventures" },
+  { href: "/venture/mine", label: "My Ventures" },
 ];
 
 function SurfaceLink({ href, label, active }: { href: string; label: string; active: boolean }) {
@@ -56,7 +56,6 @@ function VentureMenu({ pathname, badge }: { pathname: string; badge: number }) {
               {m.label}
               {m.href === "/venture/mine" && badge ? <span className="rail-badge">{badge}</span> : null}
             </span>
-            <small>{m.sub}</small>
           </Link>
         ))}
       </div>

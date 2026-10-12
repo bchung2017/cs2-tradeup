@@ -403,7 +403,6 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
   .rail-menu:hover .rail-caret { transform: rotate(180deg); }
 }
 .rail-drop a { display: flex; flex-direction: column; gap: 3px; padding: 12px 16px; text-decoration: none; color: var(--fg); font-size: 14px; font-weight: 700; border-left: 3px solid transparent; }
-.rail-drop a small { font-size: 11px; font-weight: 400; color: var(--fg-faint); }
 .rail-drop a:hover { background: var(--surface-2); border-left-color: var(--green-dim); }
 .rail-drop a.is-active { color: var(--green); border-left-color: var(--green); }
 
