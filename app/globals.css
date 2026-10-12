@@ -488,3 +488,43 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
   .vx-top4 { grid-template-columns: repeat(4, 50px); }
   .vx-top4__cell img, .vx-top4__cell .vx-skin__none { width: 42px; height: 32px; }
 }
+
+/* Contract detail as picture cards: input slots and outcomes */
+.vx-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.vx-card {
+  position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  padding: 10px; border-radius: 14px; border: 1px solid var(--surface-line);
+  background: var(--surface-2); font-size: 11px; color: var(--fg);
+}
+.vx-card--in { background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 34%, transparent), var(--surface) 72%); border-color: color-mix(in srgb, var(--tint) 45%, var(--surface-line)); }
+.vx-card--out.is-up { background: linear-gradient(180deg, rgba(46, 204, 113, 0.42), var(--surface) 62%); border-color: rgba(46, 204, 113, 0.5); }
+.vx-card--out.is-down { background: linear-gradient(180deg, rgba(235, 75, 75, 0.30), var(--surface) 62%); }
+.vx-card--out.is-flat { background: var(--surface); }
+.vx-card__chips { display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+.vx-chip-pill { background: rgba(0, 0, 0, 0.45); border-radius: 999px; padding: 2px 8px; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vx-chip-pill.is-mine { background: var(--glow); color: var(--void); font-weight: 700; }
+.vx-card__profit { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vx-card__profit.is-up { color: var(--profit); }
+.vx-card__profit.is-down { color: var(--loss); }
+.vx-card__best { position: absolute; top: 32px; right: 12px; color: var(--profit); font-weight: 700; font-size: 12px; letter-spacing: 0.08em; text-shadow: 0 0 8px rgba(92, 255, 92, 0.6); }
+.vx-card__img { display: flex; justify-content: center; align-items: center; height: 90px; }
+.vx-card__img img, .vx-card__img .vx-skin__none { width: 120px; max-width: 100%; height: 90px; object-fit: contain; display: block; }
+.vx-card__img .vx-skin__none { display: flex; align-items: center; justify-content: center; }
+.vx-card .vx-fbar { width: 100%; height: auto; }
+.vx-card__name { display: flex; flex-direction: column; line-height: 1.25; }
+.vx-card__name b { font-size: 13px; }
+.vx-card__name span { color: var(--fg-dim); }
+.vx-card__box { display: flex; flex-direction: column; background: rgba(0, 0, 0, 0.4); border-radius: 8px; padding: 6px 8px; }
+.vx-card__box span { font-size: 10px; color: var(--fg-dim); }
+.vx-card__box b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.vx-card__box small { font-size: 10px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.vx-card__foot { display: flex; justify-content: space-between; gap: 6px; font-size: 10px; margin-top: auto; }
+.vx-card__foot span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vx-card__foot a { color: var(--fg); white-space: nowrap; }
+.vx-card__meta { display: flex; justify-content: space-between; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.vx-card__phases { font-size: 10px; color: var(--fg-faint); }
+.vx-card__price { margin-top: auto; align-self: stretch; text-align: center; background: rgba(0, 0, 0, 0.45); border-radius: 10px; padding: 6px; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) {
+  .vx-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .vx-card__img, .vx-card__img img, .vx-card__img .vx-skin__none { height: 72px; }
+}

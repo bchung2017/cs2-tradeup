@@ -3,15 +3,13 @@
 // float and price, how often you'd be ahead over several pulls, and what to
 // watch out for.
 import type { Venture } from "@/lib/ventures";
-import { rarityHex } from "@/lib/display";
-import { abbr, backShort, money, oneIn, pct, ventureLine, VERDICT } from "@/lib/venture-copy";
-import { BudgetBar, OutcomeBar } from "./FloatBar";
+import { backShort, money, pct, ventureLine, VERDICT } from "@/lib/venture-copy";
+import { BudgetBar } from "./FloatBar";
+import { InputCards, OutcomeCards } from "./ContractCards";
 import Ago from "./Ago";
 import Handoff from "./Handoff";
 import type { Plan } from "@/lib/venture-fit";
-import { useImages } from "./SkinStack";
 
-const steamUrl = (skin: string, wear: string) => `https://steamcommunity.com/market/listings/730/${encodeURIComponent(`${skin} (${wear})`)}`;
 const BASIS: Record<string, string> = {
   "steam-listings": "cheapest Steam listings under cap",
   "steam-feed": "Steam median (live check failed)",
@@ -19,7 +17,6 @@ const BASIS: Record<string, string> = {
 };
 
 export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | null }) {
-  const images = useImages();
   return (
     <div className="vx-detail">
       <p className="vx-igl"><span className="vx-igl__tag">IGL</span> {ventureLine(v)}</p>
@@ -43,36 +40,7 @@ export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | n
 
       <section>
         <h4 className="hud">Buy · {v.size} inputs · {v.venue === "steam" ? "Steam" : "third-party cash"}</h4>
-        <table className="vx-table">
-          <thead><tr><th>Input</th><th>Collection</th><th>Wear</th><th>Float to buy</th><th className="num">Each</th><th className="num">Listed</th></tr></thead>
-          <tbody>
-            {v.inputs.map((i) => {
-              const mine = plan?.slots.filter((s) => s.input === i && s.owned).map((s) => s.owned!) ?? [];
-              return (
-                <tr key={`${i.skinId}|${i.wear}`}>
-                  <td>
-                    <span className="vx-rar" style={{ background: rarityHex(i.rarity) }} />
-                    {images[i.skinId] && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img className={`vx-thumb${mine.length ? " owned-glow" : ""}`} style={{ ["--glow" as string]: rarityHex(i.rarity) }} src={images[i.skinId]} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
-                    )}
-                    {i.count}× <a href={steamUrl(i.skin, i.wear)} target="_blank" rel="noreferrer">{i.skin}</a>
-                    {mine.length > 0 && (
-                      <span className="owned-tag" style={{ ["--glow" as string]: rarityHex(i.rarity) }} title={mine.map((o) => `${o.name} (${abbr(o.wear)}) ${o.float.toFixed(4)}`).join("\n")}>
-                        {mine.length} yours · {mine.map((o) => `${o.skin.id !== i.skinId ? `${o.name} ` : ""}${o.float.toFixed(4)}`).join(", ")}
-                      </span>
-                    )}
-                  </td>
-                  <td className="dim">{i.collection.replace(/^The /, "")}</td>
-                  <td>{abbr(i.wear)}</td>
-                  <td className="mono">{i.floatMin.toFixed(3)} – {i.floatMax.toFixed(3)}</td>
-                  <td className="num" title={BASIS[i.basis]}>{money(i.priceEach)}</td>
-                  <td className="num dim">{i.listed ?? "—"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <InputCards v={v} plan={plan} />
         <p className="vx-note">Prices: {[...new Set(v.inputs.map((i) => BASIS[i.basis]))].join("; ")}. Total {money(v.cost)}.</p>
       </section>
 
@@ -87,30 +55,8 @@ export default function VentureDetail({ v, plan }: { v: Venture; plan?: Plan | n
 
       <section>
         <h4 className="hud">Outcomes · {v.outcomes.length}</h4>
-        <table className="vx-table">
-          <thead><tr><th>Outcome</th><th className="num">Odds</th><th>Float</th><th></th><th className="num">Sells for</th><th className="num">Sold 24h</th></tr></thead>
-          <tbody>
-            {v.outcomes.map((o) => (
-              <tr key={o.skinId} className={o.win ? "is-win" : ""}>
-                <td>
-                  <span className="vx-rar" style={{ background: rarityHex(o.rarity) }} />
-                  {o.name} <span className="dim">({abbr(o.wear)})</span>
-                  {o.rarePhases && o.rarePhases.length > 0 && (
-                    <span className="vx-phase" title="phase average; rare phases at an even split">
-                      {o.rarePhases.map((p) => `${p.phase} ${money(p.value)}`).join(" · ")}
-                    </span>
-                  )}
-                </td>
-                <td className="num">{pct(o.probability)} <span className="dim">{oneIn(o.probability)}</span></td>
-                <td className="mono">{o.float.toFixed(4)}</td>
-                <td><OutcomeBar float={o.float} min={o.skinMin} max={o.skinMax} /></td>
-                <td className="num">{money(o.value)}{!o.checked && <span className="dim" title="model price, not checked live"> *</span>}</td>
-                <td className="num dim">{o.sold24h ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="vx-note">Green rows sell for more than the cost. * = feed price, not checked live (under half the cost).</p>
+        <OutcomeCards v={v} />
+        <p className="vx-note">Most valuable first. Green cards sell for more than the entry, red for less; the chip is profit against the entry. * = feed price, not checked live (under half the cost).</p>
       </section>
 
       <section className="vx-grid2">
