@@ -77,7 +77,6 @@ export default function MarketList({
   const minPays = Number(get("pays") || 0) / 100;
   const venue = get("venue");
   const knifeOnly = get("knife") === "1";
-  const doppler = get("doppler") === "1";
   const mine = get("mine") === "1";
   const freshH = Number(get("fresh") || 0);
   const trackedOnly = get("tracked") === "1";
@@ -98,14 +97,13 @@ export default function MarketList({
         if (v.pProfit < minPays) return false;
         if (venue && v.venue !== venue) return false;
         if (knifeOnly && v.outputTier !== "Extraordinary") return false;
-        if (doppler && !v.outcomes.some((o) => /Doppler/.test(o.name))) return false;
         if (mine && !plans.get(v.key)?.ownedCount) return false;
         if (freshH && (!v.verifiedAt || now - Date.parse(v.verifiedAt) > freshH * 3600e3)) return false;
         if (trackedOnly && !tracked[v.key]) return false;
         return true;
       })
       .sort(SORTS[sort].fn);
-  }, [data, q, tier, verdict, minCost, maxCost, minPays, venue, knifeOnly, doppler, mine, freshH, trackedOnly, tracked, sort, plans, now]);
+  }, [data, q, tier, verdict, minCost, maxCost, minPays, venue, knifeOnly, mine, freshH, trackedOnly, tracked, sort, plans, now]);
 
   if (!data.ventures.length) {
     return mineMode
@@ -155,7 +153,6 @@ export default function MarketList({
           </select>
         </label>
         <label className="vx-check"><input type="checkbox" checked={knifeOnly} onChange={(e) => set("knife", e.target.checked ? "1" : "")} /> knives only</label>
-        <label className="vx-check"><input type="checkbox" checked={doppler} onChange={(e) => set("doppler", e.target.checked ? "1" : "")} /> has a Doppler</label>
         {!mineMode && (
           <label className="vx-check" title={owned ? `inventory from ${ago(owned.at, now)}` : "load your inventory in INVENTORY or My Ventures first"}>
             <input type="checkbox" checked={mine} disabled={!owned} onChange={(e) => set("mine", e.target.checked ? "1" : "")} /> uses items I own
