@@ -44,7 +44,11 @@ export default function VentureRow({
         </div>
 
         <div className="vx-what">
-          <SlotStrip items={stackPlan(v.inputs, plan)} />
+          {/* the inputs and what they cost together */}
+          <div className="vx-what__head">
+            <SlotStrip items={stackPlan(v.inputs, plan)} />
+            <div className="vx-num vx-num--cost"><b>{money(v.cost)}</b><span className="dim">entry</span></div>
+          </div>
           <div className="vx-inputs">
             {v.inputs.map((i) => (
               <span key={`${i.skinId}|${i.wear}`}>{i.count}× {i.skin} <span className="dim">{abbr(i.wear)} ≤{i.floatMax.toFixed(2)}</span></span>
@@ -57,7 +61,6 @@ export default function VentureRow({
           </div>
         </div>
 
-        <div className="vx-num vx-num--cost"><b>{money(v.cost)}</b><span className="dim">entry</span></div>
         <div className="vx-jackpot">
           <OutcomePie v={v} />
         </div>
