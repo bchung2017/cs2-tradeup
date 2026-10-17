@@ -8,6 +8,10 @@
 //   basin   the pond's walls, edged in glowing green, rising as the camera tilts
 //   scenery     rock face, spring, waterfall, bonsai, patio and ramp
 //               (loungeScenery.ts)
+//   campus      the plaza and towers around it (loungeCampus.ts)
+// On the homepage it also plays the intro (playIntro): the Lounge, a flight
+// down to the waterfall, through it into the cave behind (loungeCave.ts),
+// across the water to the week's three biggest knife jackpots.
 // Building it is split into small steps with a frame between each
 // (createLounge reports progress for the loading bar), so the page never
 // freezes, and everything is compiled and on the GPU before the camera moves.
@@ -16,6 +20,7 @@ import { initCircuitLite } from "./circuitLite";
 import { createKoiSchool, makeKoiTexturesAsync } from "./koi2d";
 import { buildScenery, fillAt, fillable, paintBoth, type Scenery } from "./loungeScenery";
 import { buildCampus, type Campus } from "./loungeCampus";
+import { buildCave, type Cave, type IntroKnife } from "./loungeCave";
 
 const BG = 0x020507;
 const GREEN = 0x33ff33;
@@ -34,8 +39,20 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => set
 
 export interface Lounge {
   setInLounge(on: boolean): void;
+  // build the cave (progress for the loading bar), then play the intro
+  playIntro(knives: IntroKnife[], onProgress: (done: number) => void): Promise<void>;
+  stopIntro(): void; // back to the Lounge's own camera, wherever the intro was
   destroy(): void;
 }
+
+// The intro, in seconds from its start: the Lounge view holds, the camera
+// flies to the waterfall, a flash of spray as it passes through, then the
+// cave (whose own timing is in loungeCave.ts). Stages are announced as
+// "lounge:intro" events for the page's captions.
+const INTRO_HOLD = 2.6;
+const INTRO_FLY = 4.2;
+const INTRO_SWITCH = INTRO_HOLD + INTRO_FLY;
+const FLASH_S = 0.45; // either side of the switch
 
 const smooth = (u: number) => u * u * (3 - 2 * u);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -55,6 +72,13 @@ export async function createLounge(
   scene.background = new THREE.Color(BG);
   scene.fog = new THREE.Fog(BG, 18, 42);
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 200);
+  // a sheet of spray in front of the lens, for passing through the waterfall
+  const flash = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshBasicMaterial({ color: 0xd8ffe8, transparent: true, opacity: 0, depthTest: false, depthWrite: false, fog: false }));
+  flash.position.z = -0.2;
+  flash.renderOrder = 999;
+  flash.visible = false;
+  camera.add(flash);
+  scene.add(camera);
 
   // ── floor: the live circuit ──────────────────────────────────────────────
   const floorCanvas = document.createElement("canvas");
@@ -324,18 +348,23 @@ export async function createLounge(
     const dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
     last = now;
     const time = now / 1000;
-    if (reduced) u = goal;
+    if (intro) u = goal = 1; // the intro starts in the Lounge, no tilt
+    else if (reduced) u = goal;
     else u = goal > u ? Math.min(goal, u + dt / TRANSITION_S) : Math.max(goal, u - dt / TRANSITION_S);
     u = Math.min(1, Math.max(0, u));
     const s = smooth(u);
 
+    const it = intro ? (reduced ? INTRO_SWITCH + 60 : time - intro.t0) : 0;
+    const inCave = !!intro && it >= INTRO_SWITCH;
     // the floor redraws itself at 20 fps; upload it about that often
-    if (now - lastFloor > 45) { floorTex.needsUpdate = true; lastFloor = now; }
-    koiCtx.setTransform(1, 0, 0, 1, 0, 0);
-    koiCtx.clearRect(0, 0, koiCanvas.width, koiCanvas.height);
-    koiCtx.setTransform(KOI_RES, 0, 0, KOI_RES, 0, 0); // the school swims in screen pixels
-    school.frame(koiCtx, time);
-    koiTex.needsUpdate = true;
+    if (!inCave) {
+      if (now - lastFloor > 45) { floorTex.needsUpdate = true; lastFloor = now; }
+      koiCtx.setTransform(1, 0, 0, 1, 0, 0);
+      koiCtx.clearRect(0, 0, koiCanvas.width, koiCanvas.height);
+      koiCtx.setTransform(KOI_RES, 0, 0, KOI_RES, 0, 0); // the school swims in screen pixels
+      school.frame(koiCtx, time);
+      koiTex.needsUpdate = true;
+    }
 
     waterMat.uniforms.uTime.value = time;
     waterMat.uniforms.uReveal.value = s;
@@ -353,7 +382,12 @@ export async function createLounge(
     const cover = opacity >= 1;
     if (cover !== covered) { covered = cover; dispatchEvent(new CustomEvent("lounge:cover", { detail: cover })); }
 
-    placeCamera(s, time);
+    if (intro) introFrame(it, time);
+    else {
+      placeCamera(s, time);
+      flash.visible = flashOut > 0;
+      if (flashOut > 0) { (flash.material as THREE.MeshBasicMaterial).opacity = flashOut; flashOut = Math.max(0, flashOut - dt / 0.5); }
+    }
     waterMat.uniforms.uCam.value.copy(camera.position);
     renderer.render(scene, camera);
 
@@ -364,6 +398,86 @@ export async function createLounge(
       return;
     }
     raf = requestAnimationFrame(frame);
+  }
+
+  // ── intro ────────────────────────────────────────────────────────────────
+  let intro: { t0: number; cave: Cave; from: THREE.Vector3 | null; stage: string } | null = null;
+  let flashOut = 0; // spray fading after leaving the cave early
+  const lounged = () => [floor, koi, water, basin, scenery?.group, campus?.group];
+  const flyFrom = new THREE.Vector3(), flyMid = new THREE.Vector3(), flyTo = new THREE.Vector3();
+  const lookFrom = new THREE.Vector3(), lookTo = new THREE.Vector3(), camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
+  const lights = { bg: new THREE.Color(BG), near: 0, far: 0 };
+  function announce(stage: string) {
+    if (!intro || intro.stage === stage) return;
+    intro.stage = stage;
+    dispatchEvent(new CustomEvent("lounge:intro", { detail: stage }));
+  }
+  function setCave(on: boolean) {
+    const cave = intro?.cave;
+    if (!cave || cave.group.visible === on) return;
+    cave.group.visible = on;
+    const fog = scene.fog as THREE.Fog;
+    if (on) {
+      lights.near = fog.near; lights.far = fog.far;
+      fog.color.copy(cave.fogColor); fog.near = cave.fogNear; fog.far = cave.fogFar;
+      (scene.background as THREE.Color).copy(cave.fogColor);
+    } else {
+      fog.color.set(BG); fog.near = lights.near; fog.far = lights.far;
+      (scene.background as THREE.Color).set(BG);
+    }
+    floorRenderer.setPaused(on);
+  }
+  function introFrame(t: number, time: number) {
+    const cave = intro!.cave;
+    if (t < INTRO_SWITCH) {
+      setCave(false);
+      if (t < INTRO_HOLD) {
+        announce("lounge");
+        placeCamera(1, time);
+      } else {
+        announce("fly");
+        if (!intro!.from) {
+          // from wherever the drift had got to, down to the face of the falls
+          placeCamera(1, time);
+          intro!.from = flyFrom.copy(camera.position);
+          lookFrom.copy(isoTarget);
+          const f = scenery!.fall, midY = (WATER_Y + f.top) / 2;
+          lookTo.set(f.x, midY, f.z - 1);
+          flyTo.set(f.x, midY, f.z + 0.45 + 1.2);
+          flyMid.set(f.x + (flyFrom.x - f.x) * 0.25, Math.max(f.top + 2.5, flyFrom.y * 0.45), flyTo.z + 7);
+        }
+        const k = (t - INTRO_HOLD) / INTRO_FLY, e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2, m = 1 - e;
+        camPos.set(0, 0, 0).addScaledVector(flyFrom, m * m).addScaledVector(flyMid, 2 * m * e).addScaledVector(flyTo, e * e);
+        camLook.copy(lookFrom).lerp(lookTo, Math.pow(e, 0.6));
+        camera.up.set(0, 1, 0);
+        camera.position.copy(camPos);
+        camera.lookAt(camLook);
+      }
+    } else {
+      setCave(true);
+      const ct = t - INTRO_SWITCH;
+      announce(ct >= cave.closeUpAt - 1.2 ? "closeup" : "cave");
+      cave.pose(ct, camera.aspect, FOV, camPos, camLook);
+      camera.up.set(0, 1, 0);
+      camera.position.copy(camPos);
+      camera.lookAt(camLook);
+      cave.update(time, camera.position);
+    }
+    for (const o of lounged()) if (o) o.visible = o.visible && !cave.group.visible;
+    // the spray: up as the camera reaches the falls, down once inside
+    const fl = Math.max(0, 1 - Math.abs(t - INTRO_SWITCH) / FLASH_S);
+    flash.visible = fl > 0;
+    (flash.material as THREE.MeshBasicMaterial).opacity = Math.min(1, fl * 1.4);
+  }
+  function endIntro() {
+    if (!intro) return;
+    const wasInCave = intro.cave.group.visible;
+    setCave(false);
+    scene.remove(intro.cave.group);
+    intro.cave.dispose();
+    intro = null;
+    if (wasInCave) flashOut = 1; // out through the spray
+    flash.visible = false;
   }
 
   function start() {
@@ -415,8 +529,36 @@ export async function createLounge(
 
   return {
     setInLounge(on: boolean) {
+      if (intro && !on) endIntro();
       goal = on ? 1 : 0;
       start();
+    },
+    async playIntro(knives, onProgress) {
+      endIntro();
+      renderer.localClippingEnabled = true;
+      const cave = await buildCave(knives, camera.aspect, (d) => onProgress(d * 0.85));
+      if (stopped) { cave.dispose(); return; }
+      scene.add(cave.group);
+      // compile and upload the cave now, not on the frame it first appears
+      intro = { t0: 0, cave, from: null, stage: "" };
+      setCave(true);
+      cave.pose(0, camera.aspect, FOV, camPos, camLook);
+      camera.position.copy(camPos); camera.lookAt(camLook);
+      const hidden = lounged().map((o) => [o, o?.visible] as const);
+      for (const [o] of hidden) if (o) o.visible = false;
+      await renderer.compileAsync(scene, camera);
+      onProgress(0.95);
+      renderer.render(scene, camera);
+      for (const [o, v] of hidden) if (o) o.visible = !!v;
+      setCave(false);
+      await nextFrame();
+      onProgress(1);
+      intro.t0 = performance.now() / 1000;
+      u = goal = 1;
+      start();
+    },
+    stopIntro() {
+      endIntro();
     },
     destroy() {
       stopped = true;
@@ -425,6 +567,7 @@ export async function createLounge(
       removeEventListener("resize", onResize);
       document.removeEventListener("visibilitychange", onVisibility);
       floorRenderer.destroy();
+      if (intro) intro.cave.dispose();
       scenery?.dispose();
       campus?.dispose();
       renderer.dispose();

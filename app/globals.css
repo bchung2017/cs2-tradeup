@@ -545,3 +545,39 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .lounge-loading__bar { width: 100%; height: 6px; border: 1px solid var(--green-dim); background: var(--void); }
 .lounge-loading__bar > div { height: 100%; background: var(--green); box-shadow: 0 0 10px var(--green); transition: width 0.15s ease-out; }
 .lounge-loading__pct { font-size: 11px; color: var(--fg-dim); font-variant-numeric: tabular-nums; letter-spacing: 0.1em; }
+
+/* ── homepage intro (components/home/Intro.tsx) ─────────────────────────── */
+.intro { position: relative; z-index: 2; min-height: calc(100dvh - var(--rail-h)); pointer-events: none; }
+.intro a { pointer-events: auto; }
+.intro-skip {
+  position: fixed; right: 16px; bottom: 16px; z-index: 3; font-size: 12px; letter-spacing: 0.08em;
+  color: var(--fg-dim); text-decoration: none; padding: 6px 10px; border: 1px solid var(--green-dim); background: rgba(2, 5, 7, 0.6);
+}
+.intro-skip:hover { color: var(--green); border-color: var(--green); }
+.intro-caption {
+  position: fixed; left: 16px; right: 16px; bottom: 18px; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 12px;
+  opacity: 0; transform: translateY(8px); transition: opacity 1.2s ease, transform 1.2s ease; visibility: hidden;
+}
+.intro.is-shown .intro-caption { opacity: 1; transform: none; visibility: visible; }
+.intro-caption h1 { margin: 0; font-size: 13px; letter-spacing: 0.18em; color: var(--green); text-align: center; }
+.intro-caption h1 span { color: var(--fg-dim); letter-spacing: 0.08em; }
+.intro-knives { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: min(900px, 100%); }
+.intro-knives li {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; padding: 8px 6px;
+  background: rgba(2, 5, 7, 0.55); border: 1px solid var(--green-dim);
+}
+.intro-knives li.is-first { border-color: var(--green); }
+.intro-knives img { width: 100%; max-width: 180px; height: auto; }
+.intro-rank { font-size: 11px; color: var(--green); letter-spacing: 0.12em; }
+.intro-name { font-size: 13px; color: var(--fg); }
+.intro-meta { font-size: 11px; color: var(--fg-dim); font-variant-numeric: tabular-nums; }
+.intro-enter {
+  font-size: 13px; letter-spacing: 0.1em; color: var(--void); background: var(--green); padding: 8px 14px; text-decoration: none;
+  box-shadow: 0 0 14px rgba(51, 255, 51, 0.35);
+}
+@media (max-width: 560px) {
+  .intro-knives { gap: 6px; }
+  .intro-knives li { padding: 6px 4px; }
+  .intro-name { font-size: 11px; }
+  .intro-meta { font-size: 10px; }
+}
