@@ -24,6 +24,7 @@ const DEPTH = 10; // the floor's extent front-to-back, in world units
 const WATER_Y = 1.1; // water surface height above the floor
 const KOI_Y = 0.55; // the koi swim between the floor and the surface
 const RIM = 1.6; // basin wall height
+const POND_SCALE = 2.2; // how much larger the pond and rock feature are than the campus's scale
 const TRANSITION_S = 1.8; // seconds, top-down ↔ three-quarter
 const KOI_RES = 0.5; // the koi layer's pixels per screen pixel
 const FLOOR_RES = 0.75; // the floor's
@@ -204,13 +205,17 @@ export async function createLounge(
     waterMat.uniforms.uImpact.value.copy(scenery.impact);
     if (campus) { scene.remove(campus.group); campus.dispose(); }
     const box = new THREE.Box3().setFromObject(basin).union(new THREE.Box3().setFromObject(scenery.group));
-    const t = 0.35;
+    // the campus is laid out at POND_SCALE times the pond's size, then shrunk
+    // to fit: the pond and rock stand that much larger against everything
+    // around them
+    const t = 0.35, k = POND_SCALE;
     campus = buildCampus(
-      { minX: box.min.x, maxX: box.max.x, minZ: box.min.z, maxZ: box.max.z },
-      { minX: -W / 2 - t, maxX: W / 2 + t, minZ: -DEPTH / 2 - t, maxZ: DEPTH / 2 + t },
-      RIM,
+      { minX: box.min.x * k, maxX: box.max.x * k, minZ: box.min.z * k, maxZ: box.max.z * k },
+      { minX: (-W / 2 - t) * k, maxX: (W / 2 + t) * k, minZ: (-DEPTH / 2 - t) * k, maxZ: (DEPTH / 2 + t) * k },
+      RIM * k,
       campusSeed,
     );
+    campus.group.scale.setScalar(1 / k);
     scene.add(campus.group);
     frameScene(h);
   }
@@ -273,7 +278,7 @@ export async function createLounge(
     }
     // pull back past the diorama so the campus around it shows: the pond
     // stays the centrepiece, the campus fills the rest of the screen
-    isoDist *= camera.aspect < 1 ? 1.45 : 1.75;
+    isoDist *= camera.aspect < 1 ? 1.3 : 1.4;
     // fog swallows the campus's far edge, at any camera distance
     const fog = scene.fog as THREE.Fog;
     fog.near = Math.max(topDist + 4, isoDist * 0.95);
