@@ -67,23 +67,9 @@ export function buildInterior(): Interior {
     });
     return new THREE.Mesh(keep(new THREE.PlaneGeometry(w, h)), keep(new THREE.MeshBasicMaterial({ map: t, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })));
   };
-  // a night skyline, for the views out of the windows
-  const skyline = canvasTex(2048, 512, (g) => {
-    const grd = g.createLinearGradient(0, 0, 0, 512);
-    grd.addColorStop(0, "#020806"); grd.addColorStop(1, "#0c2216");
-    g.fillStyle = grd; g.fillRect(0, 0, 2048, 512);
-    for (let i = 0; i < 70; i++) {
-      const w = 40 + hash(i, 1) * 110, x = hash(i, 2) * 2048, h = 120 + hash(i, 3) * 360;
-      g.fillStyle = hash(i, 4) < 0.5 ? "#0a1611" : "#0e1d17";
-      g.fillRect(x, 512 - h, w, h);
-      for (let wy = 512 - h + 10; wy < 500; wy += 14) for (let wx = x + 6; wx < x + w - 6; wx += 10) {
-        if (hash(wx, wy) < 0.32) { g.fillStyle = hash(wy, wx) < 0.7 ? "#9fe8b4" : "#f1dd9a"; g.fillRect(wx, wy, 5, 7); }
-      }
-    }
-  });
-
   // ── the shell both rooms share: floor, ceiling, walls, the elevator bank ──
-  function shell(room: THREE.Group, H: number, floorMat: THREE.Material, wallMat: THREE.Material, ceilMat: THREE.Material, label: string) {
+  // `core`: no outer walls, only a compact core round the elevators (a glass floor)
+  function shell(room: THREE.Group, H: number, floorMat: THREE.Material, wallMat: THREE.Material, ceilMat: THREE.Material, label: string, core = false) {
     const W = ROOM.x1 - ROOM.x0, D = ROOM.z1 - ROOM.z0;
     const floor = new THREE.Mesh(keep(new THREE.PlaneGeometry(W, D)), floorMat);
     floor.rotation.x = -Math.PI / 2;
@@ -92,12 +78,15 @@ export function buildInterior(): Interior {
     ceil.rotation.x = Math.PI / 2;
     ceil.position.y = H;
     room.add(ceil);
-    box(room, W, H, 0.4, wallMat, 0, H / 2, ROOM.z0 - 0.2); // back
-    box(room, 0.4, H, D, wallMat, ROOM.x0 - 0.2, H / 2, 0); // left
-    // the elevator wall, around three openings
+    if (!core) {
+      box(room, W, H, 0.4, wallMat, 0, H / 2, ROOM.z0 - 0.2); // back
+      box(room, 0.4, H, D, wallMat, ROOM.x0 - 0.2, H / 2, 0); // left
+    }
+    // the elevator wall, around three openings (just the core's face, for a glass floor)
     const X = ELEVATOR.wallX + 0.2;
-    let z = ROOM.z0;
-    for (const ez of [...ELEV_Z, ROOM.z1 + DOOR_W / 2]) {
+    const C0 = ELEV_Z[0] - DOOR_W / 2 - 1.2, C1 = ELEV_Z[2] + DOOR_W / 2 + 1.2;
+    let z = core ? C0 : ROOM.z0;
+    for (const ez of [...ELEV_Z, (core ? C1 : ROOM.z1) + DOOR_W / 2 + 0.2]) {
       const z1 = ez - DOOR_W / 2 - 0.2;
       if (z1 > z) box(room, 0.4, H, z1 - z, wallMat, X, H / 2, (z + z1) / 2);
       z = ez + DOOR_W / 2 + 0.2;
@@ -134,6 +123,13 @@ export function buildInterior(): Interior {
       const light = new THREE.PointLight(0xfff4e0, 1.2, 4, 2);
       light.position.set((x0 + x1) / 2, ch - 0.4, z);
       room.add(light);
+    }
+    if (core) {
+      // the rest of the core: sides, back and top, round the elevator shafts
+      const xb = ELEVATOR.carBack + 0.9, xm = (X + 0.2 + xb) / 2, dx = xb - X - 0.2;
+      for (const zz of [C0, C1]) box(room, dx, H, 0.4, wallMat, xm, H / 2, zz);
+      box(room, 0.4, H, C1 - C0 + 0.4, wallMat, xb, H / 2, (C0 + C1) / 2);
+      box(room, dx, 0.3, C1 - C0, wallMat, xm, H + 0.15, (C0 + C1) / 2);
     }
     return doors;
   }
@@ -268,95 +264,254 @@ export function buildInterior(): Interior {
   }
 
   // ── floor 1: the CS2 Department ────────────────────────────────────────
+  // A wall-less floor: glass all round onto the city, the elevator core the
+  // only solid thing. Bright and playful: light oak, colour, plants, places
+  // to think (a glass pod, whiteboards), to talk (a lounge, a long table),
+  // to play (ping-pong) and to nap (pods).
   const office = new THREE.Group();
   const OH = 4.2;
-  const carpet = std(0xffffff, {
-    roughness: 0.95,
-    map: canvasTex(256, 256, (g) => {
-      g.fillStyle = "#4c5550"; g.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 3000; i++) { g.fillStyle = hash(i, 1) < 0.5 ? "#56605a" : "#414945"; g.fillRect(hash(i, 2) * 256, hash(i, 3) * 256, 2, 2); }
-      g.strokeStyle = "rgba(20,24,22,0.7)"; g.strokeRect(0, 0, 256, 256);
-    }, [40 / 4, 30 / 4]),
+  const oak = std(0xffffff, {
+    roughness: 0.6,
+    map: canvasTex(512, 512, (g) => {
+      for (let i = 0; i < 16; i++) {
+        const v = 0.86 + hash(i, 9) * 0.12;
+        g.fillStyle = `rgb(${Math.round(222 * v)},${Math.round(190 * v)},${Math.round(150 * v)})`;
+        g.fillRect(0, i * 32, 512, 32);
+        for (let k = 0; k < 30; k++) { g.fillStyle = `rgba(150,110,70,${0.08 + hash(i, k) * 0.08})`; g.fillRect(hash(k, i) * 512, i * 32 + hash(i + 1, k) * 30, 60 + hash(k, k) * 120, 1); }
+        g.fillStyle = "rgba(120,90,60,0.35)"; g.fillRect(0, i * 32, 512, 1);
+        g.fillRect(hash(i, 3) * 512, i * 32, 1, 32);
+      }
+    }, [40 / 8, 30 / 8]),
   });
-  const plaster = std(0xd9ddd8, { roughness: 0.9 });
-  const officeDoors = shell(office, OH, carpet, plaster, std(0xeef0ec), "1");
-  // the window wall on the left, the city at night beyond it
+  const coreMat = std(0xf4f1ea, { roughness: 0.9 });
+  const officeDoors = shell(office, OH, oak, coreMat, std(0xb9b4ab, { roughness: 1 }), "1", true);
+  const C = (h: number) => std(h, { roughness: 0.75 });
+  const coral = C(0xff6b5a), mustard = C(0xffc24b), teal = C(0x2ec4b6), lilac = C(0x9b8cff), sky = C(0x6ec3ff), white = C(0xf6f5f0), oakDark = C(0xb7895a), green = C(0x3fae5a);
+  const leaf = std(0x3e9a48, { flatShading: true, roughness: 0.8 });
+  const cyl = (rt: number, rb: number, h: number, mat: THREE.Material, x: number, y: number, z: number, seg = 24) => {
+    const m = new THREE.Mesh(keep(new THREE.CylinderGeometry(rt, rb, h, seg)), mat);
+    m.position.set(x, y, z);
+    office.add(m);
+    return m;
+  };
+  const blob = (r: number, mat: THREE.Material, x: number, y: number, z: number, sy = 1, sx = 1, sz = 1) => {
+    const m = new THREE.Mesh(keep(new THREE.SphereGeometry(r, 20, 14)), mat);
+    m.position.set(x, y, z); m.scale.set(sx, sy, sz);
+    office.add(m);
+    return m;
+  };
+  const plant = (x: number, z: number, big = false) => {
+    cyl(big ? 0.55 : 0.38, big ? 0.45 : 0.3, big ? 0.8 : 0.55, white, x, big ? 0.4 : 0.28, z);
+    const h = big ? 2.4 : 1.2;
+    if (big) cyl(0.06, 0.08, h - 0.6, oakDark, x, 0.8 + (h - 0.6) / 2, z, 6);
+    for (const [dx, dy, dz, r] of big ? [[0, h, 0, 0.8], [0.45, h - 0.4, 0.2, 0.6], [-0.4, h - 0.35, -0.25, 0.6]] : [[0, 0.9, 0, 0.45], [0.25, 0.75, 0.1, 0.35], [-0.2, 0.8, -0.15, 0.35]]) {
+      const c = new THREE.Mesh(keep(new THREE.IcosahedronGeometry(r, 1)), leaf);
+      c.position.set(x + dx, dy, z + dz);
+      office.add(c);
+    }
+  };
+  // glass all round, thin mullions, a slim sill
   {
-    const glass = keep(new THREE.MeshStandardMaterial({ color: 0x9fd8c0, transparent: true, opacity: 0.1, roughness: 0.05 }));
-    const pane = new THREE.Mesh(keep(new THREE.PlaneGeometry(30, OH)), glass);
-    pane.position.set(ROOM.x0 + 0.25, OH / 2, 0);
-    pane.rotation.y = Math.PI / 2;
-    office.add(pane);
-    const mull = std(0x1d2321, { metalness: 0.6, roughness: 0.4 });
-    for (let z = -15; z <= 15; z += 3) box(office, 0.2, OH, 0.12, mull, ROOM.x0 + 0.2, OH / 2, z);
-    const out = new THREE.Mesh(keep(new THREE.PlaneGeometry(80, 22)), keep(new THREE.MeshBasicMaterial({ map: skyline })));
-    out.position.set(ROOM.x0 - 16, 2, 0);
-    out.rotation.y = Math.PI / 2;
-    office.add(out);
+    const glass = keep(new THREE.MeshStandardMaterial({ color: 0xcfeee4, transparent: true, opacity: 0.08, roughness: 0.05, depthWrite: false, side: THREE.DoubleSide }));
+    const mull = std(0x2a2f2c, { metalness: 0.6, roughness: 0.4 });
+    const run = (x0: number, z0: number, x1: number, z1: number) => {
+      const L = Math.hypot(x1 - x0, z1 - z0), a = Math.atan2(z1 - z0, x1 - x0);
+      const pane = new THREE.Mesh(keep(new THREE.PlaneGeometry(L, OH)), glass);
+      pane.position.set((x0 + x1) / 2, OH / 2, (z0 + z1) / 2);
+      pane.rotation.y = -a;
+      office.add(pane);
+      for (let t = 0; t <= L + 0.01; t += 2.5) {
+        const m = box(office, 0.08, OH, 0.08, mull, x0 + Math.cos(a) * t, OH / 2, z0 + Math.sin(a) * t);
+        void m;
+      }
+      const sill = box(office, L, 0.12, 0.3, mull, (x0 + x1) / 2, 0.06, (z0 + z1) / 2);
+      sill.rotation.y = -a;
+    };
+    run(-20, -15, 20, -15); run(-20, 15, 20, 15); run(-20, -15, -20, 15);
+    const C0 = ELEV_Z[0] - DOOR_W / 2 - 1.2, C1 = ELEV_Z[2] + DOOR_W / 2 + 1.2;
+    run(20, -15, 20, C0); run(20, C1, 20, 15);
+    // the city round about, at dusk: a ring of skyline
+    const dusk = canvasTex(4096, 1024, (g) => {
+      const grd = g.createLinearGradient(0, 0, 0, 1024);
+      grd.addColorStop(0, "#14233f"); grd.addColorStop(0.45, "#3b4f86"); grd.addColorStop(0.62, "#d98b6a"); grd.addColorStop(0.7, "#f2c48a"); grd.addColorStop(0.71, "#1a2420"); grd.addColorStop(1, "#0d1311");
+      g.fillStyle = grd; g.fillRect(0, 0, 4096, 1024);
+      for (let i = 0; i < 160; i++) {
+        const w = 50 + hash(i, 11) * 140, x = hash(i, 12) * 4096, h = 120 + hash(i, 13) * 420, y0 = 727 - h;
+        g.fillStyle = hash(i, 14) < 0.5 ? "#1b2433" : "#232d3f";
+        g.fillRect(x, y0, w, h);
+        for (let wy = y0 + 8; wy < 720; wy += 12) for (let wx = x + 5; wx < x + w - 5; wx += 9) {
+          if (hash(wx, wy) < 0.38) { g.fillStyle = hash(wy, wx) < 0.6 ? "#ffd99a" : "#bfe9ff"; g.fillRect(wx, wy, 4, 6); }
+        }
+      }
+    });
+    dusk.wrapS = THREE.RepeatWrapping;
+    const ring = new THREE.Mesh(keep(new THREE.CylinderGeometry(70, 70, 60, 64, 1, true)), keep(new THREE.MeshBasicMaterial({ map: dusk, side: THREE.BackSide })));
+    ring.position.y = 8;
+    office.add(ring);
+    const ground = new THREE.Mesh(keep(new THREE.CircleGeometry(70, 48)), keep(new THREE.MeshBasicMaterial({ color: 0x0d1311 })));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -12;
+    office.add(ground);
   }
-  // the department's sign on the back wall
+  // the department's sign: a freestanding oak feature wall, moss on the back
   {
-    box(office, 22, 3.4, 0.06, std(0x14191a), 0, 2.2, ROOM.z0 + 0.03);
-    const LW = 4.2;
-    office.add(makeSign({ x: -6.5, y: 2.2, z: ROOM.z0 + 0.12, w: LW, h: LW / LOGO_ASPECT, kind: "logo" }, keep));
+    box(office, 15, 3.3, 0.3, oakDark, -1, 1.65, -11.5);
+    const LW = 3.6;
+    office.add(makeSign({ x: -5.5, y: 1.95, z: -11.3, w: LW, h: LW / LOGO_ASPECT, kind: "logo" }, keep));
     const t = textSign([
       { text: "CS2 DEPARTMENT", size: 120, color: "#ffffff" },
-      { text: "VENTURE STUDIOS  ·  FLOOR 1", size: 52, color: "#e2c27a" },
-    ], 13, 2.6, 1600);
-    t.position.set(3.2, 2.2, ROOM.z0 + 0.12);
+      { text: "VENTURE STUDIOS  ·  FLOOR 1", size: 52, color: "#ffe08a" },
+    ], 9.5, 2.0, 1600);
+    t.position.set(2.2, 1.95, -11.33);
     office.add(t);
+    const moss = std(0x2f7a3a, { roughness: 1 });
+    box(office, 14.6, 3.0, 0.05, moss, -1, 1.65, -11.68);
   }
-  // desks in pods of four, each with two glowing monitors
+  // the lounge: a big round rug, a curved sofa, bean bags, a low table
+  {
+    const rug = new THREE.Mesh(keep(new THREE.CircleGeometry(4.2, 48)), C(0xffd7a8));
+    rug.rotation.x = -Math.PI / 2; rug.position.set(-12, 0.01, 6);
+    office.add(rug);
+    const ring = new THREE.Mesh(keep(new THREE.RingGeometry(3.3, 3.6, 48)), coral);
+    ring.rotation.x = -Math.PI / 2; ring.position.set(-12, 0.015, 6);
+    office.add(ring);
+    // a curved sofa: segments round an arc
+    for (let i = 0; i < 9; i++) {
+      const a = Math.PI * 0.95 + (i / 8) * Math.PI * 0.9, r = 3;
+      const seat = box(office, 1.1, 0.45, 0.9, teal, -12 + Math.cos(a) * r, 0.25, 6 + Math.sin(a) * r);
+      seat.rotation.y = -a + Math.PI / 2;
+      const back = box(office, 1.1, 0.55, 0.25, teal, -12 + Math.cos(a) * (r + 0.4), 0.7, 6 + Math.sin(a) * (r + 0.4));
+      back.rotation.y = -a + Math.PI / 2;
+    }
+    cyl(0.9, 0.9, 0.08, white, -12, 0.42, 6.4);
+    cyl(0.12, 0.2, 0.4, oakDark, -12, 0.2, 6.4, 10);
+    for (const [x, z, m] of [[-9.6, 8.6, mustard], [-10.6, 9.8, lilac], [-13.8, 9.6, coral], [-8.8, 6.6, sky]] as const) blob(0.6, m, x, 0.35, z, 0.62, 1.05, 1.05);
+    // a floor lamp, big and round
+    cyl(0.04, 0.04, 2.6, std(0x222222), -15.6, 1.3, 8.6, 8);
+    blob(0.4, keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 1.4, 1.0) })), -15.6, 2.7, 8.6);
+  }
+  // nap pods along the far window: capsules with a soft bed, a round porthole
+  for (const [x, m] of [[-16.5, mustard], [-13.2, sky], [-9.9, lilac]] as const) {
+    const pod = new THREE.Mesh(keep(new THREE.CapsuleGeometry(0.85, 1.6, 8, 20)), m);
+    pod.rotation.x = Math.PI / 2; pod.position.set(x, 0.95, 12.6);
+    office.add(pod);
+    const opening = new THREE.Mesh(keep(new THREE.CircleGeometry(0.62, 24)), std(0x2b2f3a));
+    opening.position.set(x, 0.95, 11.35);
+    opening.rotation.y = Math.PI;
+    office.add(opening);
+    blob(0.5, white, x, 0.75, 11.6, 0.3, 1.1, 0.4); // the pillow peeking out
+  }
+  // the think tank: a round glass meeting pod with a round table
+  {
+    const glassPod = keep(new THREE.MeshStandardMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.18, roughness: 0.05, side: THREE.DoubleSide, depthWrite: false }));
+    cyl(3, 3, 3.2, glassPod, -12, 1.6, -7, 40).material = glassPod;
+    cyl(3.05, 3.05, 0.12, white, -12, 3.26, -7, 40);
+    cyl(1.2, 1.2, 0.06, white, -12, 0.76, -7);
+    cyl(0.1, 0.25, 0.74, std(0x333333), -12, 0.37, -7, 10);
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; cyl(0.32, 0.32, 0.45, [coral, mustard, teal][i % 3], -12 + Math.cos(a) * 1.8, 0.23, -7 + Math.sin(a) * 1.8, 16); }
+    // a whiteboard full of doodles beside it
+    const doodles = canvasTex(1024, 512, (g) => {
+      g.fillStyle = "#fbfbf8"; g.fillRect(0, 0, 1024, 512);
+      const ink = ["#2ec4b6", "#ff6b5a", "#4b6bff", "#1f8a3a", "#222"];
+      g.lineWidth = 5; g.lineCap = "round";
+      for (let i = 0; i < 16; i++) {
+        g.strokeStyle = ink[i % ink.length]; g.beginPath();
+        const x = 60 + hash(i, 1) * 880, y = 60 + hash(i, 2) * 380;
+        if (i % 4 === 0) g.arc(x, y, 20 + hash(i, 3) * 40, 0, 7);
+        else if (i % 4 === 1) { g.moveTo(x, y); g.lineTo(x + 120, y - 40); g.lineTo(x + 240, y + 10); }
+        else if (i % 4 === 2) g.strokeRect(x, y, 90, 50);
+        else { g.moveTo(x, y); for (let k = 1; k < 8; k++) g.lineTo(x + k * 24, y - Math.sin(k) * 30 - k * 6); }
+        g.stroke();
+      }
+      g.fillStyle = "#222"; g.font = "bold 44px 'Comic Sans MS', 'Marker Felt', sans-serif";
+      g.fillText("TRADE-UP IDEAS", 60, 60); g.fillStyle = "#ff6b5a"; g.fillText("ship it! ✓", 680, 470);
+    });
+    const wb = new THREE.Mesh(keep(new THREE.PlaneGeometry(4.2, 2.1)), std(0xffffff, { map: doodles, roughness: 0.3 }));
+    wb.position.set(-6.5, 1.6, -8.6); wb.rotation.y = Math.PI / 5;
+    office.add(wb);
+    for (const s2 of [-1, 1]) { const leg = box(office, 0.06, 1.6, 0.06, std(0x888888, { metalness: 0.6 }), -6.5 + s2 * 1.7 * Math.cos(Math.PI / 5), 0.8, -8.6 - s2 * 1.7 * Math.sin(Math.PI / 5)); void leg; }
+  }
+  // the long table: oak, colourful chairs, a few laptops glowing
   const screenTex = canvasTex(256, 160, (g) => {
-    g.fillStyle = "#04140a"; g.fillRect(0, 0, 256, 160);
+    g.fillStyle = "#0b1d14"; g.fillRect(0, 0, 256, 160);
     g.strokeStyle = "rgba(51,255,51,0.25)"; g.lineWidth = 1;
     for (let x = 0; x < 256; x += 32) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 160); g.stroke(); }
-    for (let y = 0; y < 160; y += 32) { g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke(); }
     g.strokeStyle = "#5dff7a"; g.lineWidth = 3; g.beginPath();
     for (let x = 0; x <= 256; x += 8) g.lineTo(x, 110 - Math.sin(x * 0.05) * 30 - x * 0.2 + hash(x, 3) * 12);
     g.stroke();
-    g.fillStyle = "#e2c27a"; g.fillRect(14, 14, 60, 10);
+    g.fillStyle = "#ffc24b"; g.fillRect(14, 14, 60, 10);
   }, [1, 1]);
   screenTex.wrapS = THREE.RepeatWrapping;
+  const screen = keep(new THREE.MeshBasicMaterial({ map: screenTex, color: new THREE.Color(1.2, 1.25, 1.2) }));
   {
-    const top = std(0xf2f3ef, { roughness: 0.4 }), leg = std(0x2a2f2c, { metalness: 0.5 }), chair = std(0x1e2422);
-    const screen = keep(new THREE.MeshBasicMaterial({ map: screenTex, color: new THREE.Color(1.3, 1.4, 1.3) }));
-    for (const x of [-14, -8, -2, 4]) for (const z of [-8, -2.5, 3, 8.5]) {
-      box(office, 3.2, 0.06, 1.8, top, x, 0.74, z);
-      for (const [dx, dz] of [[-1.5, -0.8], [1.5, -0.8], [-1.5, 0.8], [1.5, 0.8]]) box(office, 0.06, 0.72, 0.06, leg, x + dx, 0.36, z + dz);
-      for (const side of [-1, 1]) for (const dx of [-0.8, 0.8]) {
-        box(office, 0.7, 0.42, 0.04, leg, x + dx, 1.1, z + side * 0.25);
-        const s = new THREE.Mesh(keep(new THREE.PlaneGeometry(0.64, 0.36)), screen);
-        s.position.set(x + dx, 1.1, z + side * 0.25 + side * 0.03);
-        if (side < 0) s.rotation.y = Math.PI;
-        office.add(s);
-        box(office, 0.55, 0.5, 0.55, chair, x + dx, 0.5, z + side * 1.25);
-        box(office, 0.55, 0.6, 0.08, chair, x + dx, 0.95, z + side * 1.5);
+    box(office, 10, 0.08, 1.8, std(0xe6c9a1, { roughness: 0.5 }), 3, 0.76, 3.5);
+    for (const x of [-1.5, 7.5]) box(office, 0.12, 0.72, 1.4, std(0x2a2a2a), x, 0.36, 3.5);
+    const cols = [coral, mustard, teal, lilac, sky];
+    for (let i = 0; i < 6; i++) for (const sd of [-1, 1]) {
+      const x = -1 + i * 1.65, z = 3.5 + sd * 1.25;
+      box(office, 0.5, 0.06, 0.5, cols[(i + (sd > 0 ? 2 : 0)) % cols.length], x, 0.46, z);
+      box(office, 0.5, 0.5, 0.06, cols[(i + (sd > 0 ? 2 : 0)) % cols.length], x, 0.72, z + sd * 0.24);
+      for (const dx of [-0.2, 0.2]) box(office, 0.04, 0.46, 0.04, std(0x333333), x + dx, 0.23, z);
+      if ((i + (sd > 0 ? 1 : 0)) % 2 === 0) {
+        box(office, 0.42, 0.02, 0.3, std(0xcfd2d4, { metalness: 0.6 }), x, 0.81, 3.5 + sd * 0.45);
+        const s3 = new THREE.Mesh(keep(new THREE.PlaneGeometry(0.4, 0.26)), screen);
+        s3.position.set(x, 0.95, 3.5 + sd * 0.6); s3.rotation.x = sd > 0 ? -0.25 : 0.25; if (sd < 0) s3.rotation.y = Math.PI;
+        office.add(s3);
       }
     }
-    // planters between the pods, a big market screen on the front wall
-    const leaf = std(0x2e7a36, { flatShading: true });
-    for (const x of [-11, -5, 1]) {
-      box(office, 1.6, 0.7, 0.6, std(0x2a2f2c), x, 0.35, 0.25);
-      for (let i = 0; i < 3; i++) {
-        const c = new THREE.Mesh(keep(new THREE.IcosahedronGeometry(0.38, 1)), leaf);
-        c.position.set(x - 0.5 + i * 0.5, 0.95, 0.25);
-        office.add(c);
-      }
+    // pendant lights over it: big coloured domes
+    for (let i = 0; i < 3; i++) {
+      const x = -0.5 + i * 3.5;
+      cyl(0.015, 0.015, 1.3, std(0x222222), x, OH - 0.65, 3.5, 6);
+      const dome = new THREE.Mesh(keep(new THREE.SphereGeometry(0.45, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2)), [mustard, coral, teal][i]);
+      dome.position.set(x, OH - 1.35, 3.5);
+      office.add(dome);
+      blob(0.16, keep(new THREE.MeshBasicMaterial({ color: new THREE.Color(1.8, 1.6, 1.2) })), x, OH - 1.4, 3.5);
     }
-    const big = new THREE.Mesh(keep(new THREE.PlaneGeometry(9, 2.6)), screen);
-    big.position.set(-4, 2.2, ROOM.z1 - 0.05);
-    big.rotation.y = Math.PI;
-    office.add(big);
   }
-  for (let x = -16; x <= 12; x += 4) for (let z = -12; z <= 12; z += 4) box(office, 1.2, 0.04, 1.2, glow(1.0, 1.02, 1.0), x, OH - 0.03, z);
-  office.add(new THREE.HemisphereLight(0xf2f6f2, 0x2a2f2c, 1.4));
+  // standing desks in a loose zig-zag by the window, each with a monitor
+  for (let i = 0; i < 5; i++) {
+    const x = -4 + i * 3.6, z = -13 + (i % 2) * 0.8;
+    box(office, 2.0, 0.06, 0.9, white, x, 1.08, z);
+    for (const dx of [-0.85, 0.85]) box(office, 0.06, 1.06, 0.06, std(0x333333), x + dx, 0.53, z);
+    box(office, 0.9, 0.52, 0.04, std(0x1a1a1a), x, 1.45, z - 0.25);
+    const s4 = new THREE.Mesh(keep(new THREE.PlaneGeometry(0.84, 0.46)), screen);
+    s4.position.set(x, 1.45, z - 0.225);
+    office.add(s4);
+    box(office, 0.55, 0.65, 0.55, [coral, teal, mustard, lilac, sky][i], x, 0.33, z + 0.9); // a perch stool
+  }
+  // ping-pong in the open middle
   {
-    const l = new THREE.DirectionalLight(0xffffff, 0.8);
-    l.position.set(-10, 12, 6);
+    box(office, 2.74, 0.06, 1.52, std(0x1f6fd6, { roughness: 0.5 }), 6, 0.76, -5.5);
+    box(office, 2.74, 0.004, 0.03, white, 6, 0.795, -5.5);
+    box(office, 0.02, 0.16, 1.6, std(0xeeeeee), 6, 0.86, -5.5);
+    for (const [dx, dz] of [[-1.2, -0.6], [1.2, -0.6], [-1.2, 0.6], [1.2, 0.6]]) box(office, 0.06, 0.74, 0.06, std(0x333333), 6 + dx, 0.37, -5.5 + dz);
+    blob(0.05, white, 6.4, 0.84, -5.3);
+    const rug2 = new THREE.Mesh(keep(new THREE.CircleGeometry(2.6, 40)), C(0xd8f3ee));
+    rug2.rotation.x = -Math.PI / 2; rug2.position.set(6, 0.01, -5.5); rug2.scale.set(1.5, 1, 1);
+    office.add(rug2);
+  }
+  // plants everywhere, and a hanging garden over the lounge
+  for (const [x, z, big] of [[-18, -13, true], [-18, 2, true], [-5, 12.5, true], [3, 12.5, false], [9, 9, true], [14, -12.5, true], [-1, -9, false], [12, 7.5, false]] as const) plant(x, z, big);
+  for (let i = 0; i < 7; i++) {
+    const x = -15 + i * 1.2, z = 6 + Math.sin(i) * 1.5;
+    cyl(0.01, 0.01, 0.8, std(0x333333), x, OH - 0.4, z, 4);
+    cyl(0.22, 0.16, 0.25, white, x, OH - 0.9, z, 12);
+    for (let k = 0; k < 3; k++) blob(0.12, leaf, x + (hash(i, k) - 0.5) * 0.3, OH - 1.05 - k * 0.18, z + (hash(k, i) - 0.5) * 0.3);
+  }
+  // round ceiling lights everywhere, and bright, even light
+  for (let x = -16; x <= 16; x += 5) for (let z = -12; z <= 12; z += 5) {
+    const d = new THREE.Mesh(keep(new THREE.CircleGeometry(0.45, 24)), glow(1.05, 1.03, 0.98));
+    d.rotation.x = Math.PI / 2; d.position.set(x, OH - 0.02, z);
+    office.add(d);
+  }
+  office.add(new THREE.HemisphereLight(0xffffff, 0xe6d8c4, 1.3));
+  {
+    const l = new THREE.DirectionalLight(0xfff1dc, 1.2);
+    l.position.set(-10, 12, 8);
     office.add(l);
-    for (const [x, z] of [[-10, -5], [-10, 6], [2, -5], [2, 6]]) {
-      const p = new THREE.PointLight(0xf4fff6, 7, 14, 1.6);
+    for (const [x, z] of [[-11, -5], [-11, 7], [2, -6], [2, 6], [12, 0]]) {
+      const p = new THREE.PointLight(0xfff6ea, 4, 14, 1.6);
       p.position.set(x, OH - 0.5, z);
       office.add(p);
     }

@@ -399,8 +399,9 @@ export async function createLounge(
   const LOBBY_IDLE_TALL = posed([0, 1.7, 9.5], [0, 4.2, -15]); // narrow screens: square on to the logo
   const ELEV_FRONT: Pose = { p: new THREE.Vector3(16.6, 1.7, -2), yaw: 0, pitch: 0 };
   const ELEV_CAR: Pose = { p: new THREE.Vector3(21.6, 1.7, -2), yaw: Math.PI, pitch: -0.03 };
+  const ELEV_OUT: Pose = { p: new THREE.Vector3(16.6, 1.7, -2), yaw: Math.PI, pitch: 0 }; // just out of the doors, still facing out
   const OFFICE_IDLE = posed([13, 1.8, 6], [-1, 2.0, -15]);
-  const OFFICE_IDLE_TALL = posed([9, 1.8, 11], [3.5, 2.2, -15]);
+  const OFFICE_IDLE_TALL = posed([11, 1.8, 10], [0.5, 2.2, -12]);
   const lobbyIdle = () => (camera.aspect < 1 ? LOBBY_IDLE_TALL : LOBBY_IDLE);
   const officeIdle = () => (camera.aspect < 1 ? OFFICE_IDLE_TALL : OFFICE_IDLE);
   // room units → the world (both rooms are unrotated, scaled down uniformly)
@@ -502,8 +503,8 @@ export async function createLounge(
     emit(true, { ride: { from: labels[0], to: labels[1] } });
     let switched = false;
     poseRoom = from;
-    run(12, (k, time) => {
-      const t = k * 12;
+    run(13, (k, time) => {
+      const t = k * 13;
       if (t < 2.4) lerpPose(start, ELEV_FRONT, seg(t, 0, 2.4));
       else if (t < 3.4) { lerpPose(ELEV_FRONT, ELEV_FRONT, 0); interior.setDoors(from, seg(t, 2.4, 3.4)); }
       else if (t < 5.2) {
@@ -520,8 +521,10 @@ export async function createLounge(
         pose.p.y += Math.sin(time * 30) * 0.004 * Math.min(1, (t - 6.2) * 2) * Math.min(1, (8.6 - t) * 2); // the ride's hum
       } else {
         if (!switched) { switched = true; setWhere(to); poseRoom = to; }
-        interior.setDoors(to, t < 10.8 ? seg(t, 8.6, 9.6) : 1 - seg(t, 10.8, 11.8));
-        lerpPose(ELEV_CAR, endPose, seg(t, 9.6, 12));
+        interior.setDoors(to, t < 11 ? seg(t, 8.6, 9.6) : 1 - seg(t, 11, 12));
+        // step straight out of the car first, then turn into the room
+        if (t < 10.9) lerpPose(ELEV_CAR, ELEV_OUT, seg(t, 9.6, 10.9));
+        else lerpPose(ELEV_OUT, endPose, seg(t, 10.9, 13));
       }
     }, () => { interior.setDoors(to, 0); stop = endStop; emit(false); });
   }
