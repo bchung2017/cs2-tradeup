@@ -90,7 +90,7 @@ export default function TopRail() {
 
   return (
     <nav className="rail">
-      <Link href="/" className="rail-brand">
+      <Link href="/venture/market" className="rail-brand">
         <span className="rail-brand__prompt">$</span> journeyman
       </Link>
 
