@@ -1017,6 +1017,7 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
           vec3 c = mix(vec3(0.02, 0.07, 0.07), vec3(0.06, 0.2, 0.17), rip * 0.6);
           c += vec3(0.5, 1.0, 0.7) * glint * 0.55;
           gl_FragColor = vec4(c, 1.0);
+          gl_FragColor.rgb = sRGBTransferEOTF(gl_FragColor).rgb; // written in display colours: to linear for the HDR buffer
           #include <fog_fragment>
         }`,
     }));
@@ -1084,6 +1085,7 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
             c = mix(c, vec3(0.45, 0.75, 0.5), step(h, 4.0) * step(0.1, fract(along / 3.0)) * 0.7);
           }
           gl_FragColor = vec4(c, 1.0);
+          gl_FragColor.rgb = sRGBTransferEOTF(gl_FragColor).rgb; // written in display colours: to linear for the HDR buffer
           #include <fog_fragment>
         }`,
     }));

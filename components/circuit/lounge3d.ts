@@ -13,6 +13,9 @@
 // The camera has two places to end up: the Lounge's raised three-quarter view
 // (/lounge), or standing at the pool's front edge at about eye height,
 // looking across the water to the rock and the waterfall (the homepage).
+// It renders in HDR (a half-float buffer) with a bloom pass whose threshold
+// sits just above white: only what shines brighter than white glows, which
+// is the koi (their shaders go past 1).
 // Building it is split into small steps with a frame between each
 // (createLounge reports progress for the loading bar), so the page never
 // freezes, and everything is compiled and on the GPU before the camera moves.
@@ -20,6 +23,10 @@ import * as THREE from "three";
 import { initCircuitLite } from "./circuitLite";
 import { createKoiSchool, makeKoiTexturesAsync } from "./koi2d";
 import { createKoi3D } from "./loungeKoi";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { buildScenery, fillAt, fillable, paintBoth, type Scenery } from "./loungeScenery";
 import { buildCampus, type Campus } from "./loungeCampus";
 
@@ -63,6 +70,13 @@ export async function createLounge(
   scene.background = new THREE.Color(BG);
   scene.fog = new THREE.Fog(BG, 18, 42);
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 200);
+  // HDR: the scene into a half-float, multisampled buffer, the over-bright
+  // parts bloomed, then tone and colour space for the screen
+  const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 1.1, 0.55, 1.0);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
 
   // ── floor: the live circuit ──────────────────────────────────────────────
   const floorCanvas = document.createElement("canvas");
@@ -127,6 +141,7 @@ export async function createLounge(
         vec3 col = mix(vec3(0.02, 0.10, 0.08), uGreen, 0.35 * fres) + uGreen * band * 0.10;
         float a = (0.10 + 0.55 * fres + band * 0.12) * uReveal;
         gl_FragColor = vec4(col, a);
+        gl_FragColor.rgb = sRGBTransferEOTF(gl_FragColor).rgb; // written in display colours: to linear for the HDR buffer
       }`,
   });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 1, 1), waterMat);
@@ -190,6 +205,7 @@ export async function createLounge(
   function layout() {
     const w = innerWidth, h = innerHeight;
     renderer.setSize(w, h, false);
+    composer.setSize(w, h);
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
     camera.aspect = w / h;
@@ -379,7 +395,7 @@ export async function createLounge(
     placeCamera(s, time);
     koi.update(school.fish(), KOI_Y, camera.position, 1);
     waterMat.uniforms.uCam.value.copy(camera.position);
-    renderer.render(scene, camera);
+    composer.render();
 
     if (u === 0 && goal === 0) {
       onIdle(true); // back to flat: stop drawing until the next visit
@@ -427,7 +443,7 @@ export async function createLounge(
   // GPU now rather than on the first frame of the move
   canvas.style.opacity = "0";
   floorTex.needsUpdate = true;
-  renderer.render(scene, camera);
+  composer.render(); // also compiles the bloom's shaders
   scenery!.update(0, 0);
   campus!.update(0, 0);
   basin.visible = false;
@@ -455,6 +471,8 @@ export async function createLounge(
       floorRenderer.destroy();
       scenery?.dispose();
       campus?.dispose();
+      bloom.dispose();
+      composer.dispose();
       renderer.dispose();
       floorTex.dispose();
       koi.dispose();

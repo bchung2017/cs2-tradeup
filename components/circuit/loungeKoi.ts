@@ -6,7 +6,9 @@
 // rebuilt from its spine every frame (a few hundred vertices each):
 //   body   a tube with an oval cross-section, a flatter belly, the 2D
 //          koi's width profile and tail wave, wrapped in the same metallic
-//          smoke texture, with a moving sheen, a rim light and eyes
+//          smoke texture, with a moving sheen, a rim light and eyes; it
+//          emits its scheme's bright colour past white (HDR), which the
+//          Lounge's bloom turns into a glow
 //   fins   translucent sheets edged in the scheme's bright colour: the tail
 //          (the profile's fan), pectorals and pelvics that wave, a dorsal sail
 import * as THREE from "three";
@@ -19,6 +21,7 @@ const BODY_END = 0.66; // the tube stops here; the tail fin carries on to 1
 const TAIL_U0 = 0.58;
 const NB = 18, RJ = 12; // body rings, vertices around a ring
 const NT = 10, MF = 8, ND = 10; // tail, side-fin and dorsal segments
+const GLOW = 1.0; // how far past white the koi shine (the bloom starts at white)
 
 function profileWidth(L: number, u: number) {
   let w: number;
@@ -66,7 +69,7 @@ const BODY_VERT = /* glsl */ `
   }`;
 const BODY_FRAG = /* glsl */ `
   uniform sampler2D map; uniform vec3 hot; uniform vec3 base; uniform vec3 cam;
-  uniform float sweepU; uniform float uvOff; uniform float reveal;
+  uniform float sweepU; uniform float uvOff; uniform float reveal; uniform float glow;
   varying vec2 vUv; varying vec3 vN; varying vec3 vW;
   void main() {
     vec3 n = normalize(vN), v = normalize(cam - vW), L = normalize(vec3(-0.35, 1.0, 0.45));
@@ -78,10 +81,13 @@ const BODY_FRAG = /* glsl */ `
     float rim = pow(1.0 - max(0.0, dot(n, v)), 2.4);
     float sweep = exp(-pow(vUv.x / ${BODY_END.toFixed(2)} - sweepU, 2.0) * 22.0) * max(0.0, n.y);
     vec3 c = mix(base, tex, 0.85) * diff + hot * (spec * 0.7 + rim * 0.55 + sweep * 0.55);
+    // emission, brighter than white: a steady inner light, hotter along the
+    // sheen and at the rim
+    c += hot * glow * (0.35 + 0.35 * dot(tex, vec3(0.33)) + 2.0 * sweep + 1.3 * rim);
     // eyes, either side of the head
     vec2 e1 = vec2(vUv.x - 0.055, vUv.y - 0.085), e2 = vec2(vUv.x - 0.055, vUv.y - 0.415);
     float eye = 1.0 - smoothstep(0.012, 0.018, min(length(e1 * vec2(1.0, 0.6)), length(e2 * vec2(1.0, 0.6))));
-    c = mix(c, vec3(0.01), eye * 0.92);
+    c = mix(c, vec3(0.01), eye * 0.95);
     gl_FragColor = vec4(c, reveal);
     #include <colorspace_fragment>
   }`;
@@ -89,16 +95,16 @@ const FIN_VERT = /* glsl */ `
   varying vec2 vUv;
   void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const FIN_FRAG = /* glsl */ `
-  uniform vec3 hot; uniform vec3 mid; uniform float reveal;
+  uniform vec3 hot; uniform vec3 mid; uniform float reveal; uniform float glow;
   varying vec2 vUv;
   void main() {
     float e = abs(vUv.y * 2.0 - 1.0);
     float edge = smoothstep(0.72, 1.0, e) + smoothstep(0.8, 1.0, vUv.x) * 0.6;
     float rays = 0.0;
     for (int i = -1; i <= 1; i++) rays += 1.0 - smoothstep(0.0, 0.07, abs(vUv.y - 0.5 - float(i) * 0.25));
-    float glow = clamp(edge + rays * 0.35, 0.0, 1.0);
-    vec3 c = mix(mid * 0.7, hot, glow);
-    gl_FragColor = vec4(c, (0.22 + 0.6 * glow) * reveal);
+    float lit = clamp(edge + rays * 0.35, 0.0, 1.0);
+    vec3 c = mix(mid * 0.7, hot, lit) * (1.0 + glow * 2.2 * lit); // edges and rays past white
+    gl_FragColor = vec4(c, (0.22 + 0.6 * lit) * reveal);
     #include <colorspace_fragment>
   }`;
 
@@ -164,11 +170,11 @@ export function createKoi3D(): Koi3D {
     finGeo.setAttribute("uv", new THREE.BufferAttribute(fuv, 2));
     finGeo.setIndex(fidx);
     const bodyMat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: null }, hot: { value: new THREE.Color() }, base: { value: new THREE.Color() }, cam: { value: new THREE.Vector3() }, sweepU: { value: 0 }, uvOff: { value: 0 }, reveal: { value: 1 } },
+      uniforms: { map: { value: null }, hot: { value: new THREE.Color() }, base: { value: new THREE.Color() }, cam: { value: new THREE.Vector3() }, sweepU: { value: 0 }, uvOff: { value: 0 }, reveal: { value: 1 }, glow: { value: GLOW } },
       vertexShader: BODY_VERT, fragmentShader: BODY_FRAG,
     });
     const finMat = new THREE.ShaderMaterial({
-      uniforms: { hot: { value: new THREE.Color() }, mid: { value: new THREE.Color() }, reveal: { value: 1 } },
+      uniforms: { hot: { value: new THREE.Color() }, mid: { value: new THREE.Color() }, reveal: { value: 1 }, glow: { value: GLOW } },
       vertexShader: FIN_VERT, fragmentShader: FIN_FRAG,
       transparent: true, depthWrite: false, side: THREE.DoubleSide,
     });

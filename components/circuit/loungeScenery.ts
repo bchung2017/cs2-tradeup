@@ -161,6 +161,7 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
         float foot = smoothstep(0.25, 0.0, vUv.y);
         vec3 c = mix(vec3(0.25, 1.0, 0.55), vec3(0.85, 1.0, 0.9), streak * 0.6 + foot * 0.5);
         gl_FragColor = vec4(c, (0.18 + 0.45 * glow + foot * 0.3) * edgeFade * uReveal);
+        gl_FragColor.rgb = sRGBTransferEOTF(gl_FragColor).rgb; // written in display colours: to linear for the HDR buffer
       }`,
   }));
   const fall = new THREE.Mesh(fallGeo, fallMat);
@@ -208,6 +209,7 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
       void main(){
         float d = length(gl_PointCoord - 0.5);
         gl_FragColor = vec4(0.78, 1.0, 0.83, smoothstep(0.5, 0.1, d) * (1.0 - vPh) * uOpacity);
+        gl_FragColor.rgb = sRGBTransferEOTF(gl_FragColor).rgb; // written in display colours: to linear for the HDR buffer
       }`,
   }));
   const mist = new THREE.Points(mistGeo, mistMat);
@@ -247,6 +249,7 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
         float core = smoothstep(0.35, 0.0, d);
         vec3 c = mix(vec3(0.05, 0.35, 0.18), vec3(0.8, 1.0, 0.85), ring * 0.8 + core * 0.6);
         gl_FragColor = vec4(c, (0.55 + 0.35 * ring + 0.3 * core) * smoothstep(1.0, 0.92, d) * uReveal);
+        gl_FragColor.rgb = sRGBTransferEOTF(gl_FragColor).rgb; // written in display colours: to linear for the HDR buffer
       }`,
   }));
   const pool = new THREE.Mesh(keep(new THREE.CircleGeometry(springR, 40)), springMat);
