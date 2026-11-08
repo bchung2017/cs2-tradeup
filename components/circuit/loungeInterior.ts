@@ -251,8 +251,8 @@ export function buildInterior(): Interior {
   const carpet = std(0xffffff, {
     roughness: 0.95,
     map: canvasTex(256, 256, (g) => {
-      g.fillStyle = "#2a302d"; g.fillRect(0, 0, 256, 256);
-      for (let i = 0; i < 3000; i++) { g.fillStyle = hash(i, 1) < 0.5 ? "#323935" : "#232926"; g.fillRect(hash(i, 2) * 256, hash(i, 3) * 256, 2, 2); }
+      g.fillStyle = "#4c5550"; g.fillRect(0, 0, 256, 256);
+      for (let i = 0; i < 3000; i++) { g.fillStyle = hash(i, 1) < 0.5 ? "#56605a" : "#414945"; g.fillRect(hash(i, 2) * 256, hash(i, 3) * 256, 2, 2); }
       g.strokeStyle = "rgba(20,24,22,0.7)"; g.strokeRect(0, 0, 256, 256);
     }, [40 / 4, 30 / 4]),
   });

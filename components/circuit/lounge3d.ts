@@ -389,10 +389,10 @@ export async function createLounge(
   const LOBBY_EXIT = posed([0, 1.7, 13.6], [0, 1.7, 30]);
   const ELEV_FRONT: Pose = { p: new THREE.Vector3(16.6, 1.7, -2), yaw: 0, pitch: 0 };
   const ELEV_CAR: Pose = { p: new THREE.Vector3(21.6, 1.7, -2), yaw: Math.PI, pitch: -0.03 };
-  const OFFICE_IDLE = posed([12, 1.7, 1], [-8, 1.9, -9]);
+  const OFFICE_IDLE = posed([13, 1.8, 6], [-1, 2.0, -15]);
   // on a narrow screen, square on to each room's sign
   const LOBBY_IDLE_TALL = posed([0, 1.7, 9.5], [0, 4.2, -15]);
-  const OFFICE_IDLE_TALL = posed([8, 1.8, 11], [1, 2.2, -15]);
+  const OFFICE_IDLE_TALL = posed([9, 1.8, 11], [3.5, 2.2, -15]);
   const lobbyIdle = () => (camera.aspect < 1 ? LOBBY_IDLE_TALL : LOBBY_IDLE);
   const officeIdle = () => (camera.aspect < 1 ? OFFICE_IDLE_TALL : OFFICE_IDLE);
   const pose: Pose = { p: new THREE.Vector3(), yaw: 0, pitch: 0 };
