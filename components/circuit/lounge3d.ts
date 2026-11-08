@@ -3,7 +3,8 @@
 // raised three-quarter view and drifts around the pond; leaving, it eases
 // back. Same pieces as the flat background, now at depth:
 //   floor   the circuit, drawn live by circuitLite into an off-screen canvas
-//   koi     the same school (koi2d.js) on their own layer above the floor
+//   koi     the same school (koi2d.js), as 3D fish swimming above the floor
+//           (loungeKoi.ts), so they look right from any angle
 //   water   a rippling surface above the koi, phosphor sheen at grazing angles
 //   basin   the pond's walls, edged in glowing green, rising as the camera tilts
 //   scenery     rock face, spring, waterfall, bonsai, patio and ramp
@@ -18,6 +19,7 @@
 import * as THREE from "three";
 import { initCircuitLite } from "./circuitLite";
 import { createKoiSchool, makeKoiTexturesAsync } from "./koi2d";
+import { createKoi3D } from "./loungeKoi";
 import { buildScenery, fillAt, fillable, paintBoth, type Scenery } from "./loungeScenery";
 import { buildCampus, type Campus } from "./loungeCampus";
 
@@ -32,7 +34,6 @@ const POND_SCALE = 2.2; // how much larger the pond and rock feature are than th
 const TRANSITION_S = 1.8; // seconds, top-down ↔ three-quarter
 const EYE = 0.85; // eye height above the plaza, at the campus's scale (a person, POND_SCALE smaller)
 const EDGE_FOV = 52; // a wider lens when standing at the edge
-const KOI_RES = 0.5; // the koi layer's pixels per screen pixel
 const FLOOR_RES = 0.75; // the floor's
 
 // wait for the browser to paint (so the loading bar moves) before going on
@@ -75,17 +76,12 @@ export async function createLounge(
   floor.rotation.x = -Math.PI / 2;
   scene.add(floor);
 
-  // ── koi: the same school, on a transparent layer at depth ────────────────
-  const koiCanvas = document.createElement("canvas");
-  const koiCtx = koiCanvas.getContext("2d")!;
+  // ── koi: the same school, swimming in the screen's pixel field, drawn as
+  // 3D fish at depth ──────────────────────────────────────────────────────
   // the koi's smoke textures are the slowest thing to make: one per frame
   const school = createKoiSchool(await makeKoiTexturesAsync((d) => step(0.2 + 0.35 * d)));
-  const koiTex = new THREE.CanvasTexture(koiCanvas);
-  koiTex.colorSpace = THREE.SRGBColorSpace;
-  const koi = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: koiTex, transparent: true, depthWrite: false }));
-  koi.rotation.x = -Math.PI / 2;
-  koi.position.y = KOI_Y;
-  scene.add(koi);
+  const koi = createKoi3D();
+  scene.add(koi.group);
 
   // ── water: a rippling surface, see-through from above, sheen at an angle ─
   const waterMat = new THREE.ShaderMaterial({
@@ -199,10 +195,9 @@ export async function createLounge(
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     W = DEPTH * (w / h);
-    for (const m of [floor, koi, water]) m.scale.set(W, DEPTH, 1);
-    koiCanvas.width = Math.round(w * KOI_RES);
-    koiCanvas.height = Math.round(h * KOI_RES);
+    for (const m of [floor, water]) m.scale.set(W, DEPTH, 1);
     school.setSize(w, h);
+    koi.setField(w, h, W, DEPTH);
   }
   function rebuild(h: number) {
     buildBasin();
@@ -363,11 +358,7 @@ export async function createLounge(
 
     // the floor redraws itself at 20 fps; upload it about that often
     if (now - lastFloor > 45) { floorTex.needsUpdate = true; lastFloor = now; }
-    koiCtx.setTransform(1, 0, 0, 1, 0, 0);
-    koiCtx.clearRect(0, 0, koiCanvas.width, koiCanvas.height);
-    koiCtx.setTransform(KOI_RES, 0, 0, KOI_RES, 0, 0); // the school swims in screen pixels
-    school.frame(koiCtx, time);
-    koiTex.needsUpdate = true;
+    school.advance(time);
 
     waterMat.uniforms.uTime.value = time;
     waterMat.uniforms.uReveal.value = s;
@@ -386,6 +377,7 @@ export async function createLounge(
     if (cover !== covered) { covered = cover; dispatchEvent(new CustomEvent("lounge:cover", { detail: cover })); }
 
     placeCamera(s, time);
+    koi.update(school.fish(), KOI_Y, camera.position, 1);
     waterMat.uniforms.uCam.value.copy(camera.position);
     renderer.render(scene, camera);
 
@@ -428,13 +420,13 @@ export async function createLounge(
   basin.scale.y = 1;
   waterMat.uniforms.uReveal.value = 1;
   placeCamera(1, 0);
+  koi.update(school.fish(), KOI_Y, camera.position, 1); // the fish's meshes exist before compiling
   await renderer.compileAsync(scene, camera);
   await step(0.92);
   // one hidden draw of the full scene: uploads textures and geometry to the
   // GPU now rather than on the first frame of the move
   canvas.style.opacity = "0";
   floorTex.needsUpdate = true;
-  koiTex.needsUpdate = true;
   renderer.render(scene, camera);
   scenery!.update(0, 0);
   campus!.update(0, 0);
@@ -464,7 +456,8 @@ export async function createLounge(
       scenery?.dispose();
       campus?.dispose();
       renderer.dispose();
-      for (const t of [floorTex, koiTex]) t.dispose();
+      floorTex.dispose();
+      koi.dispose();
     },
   };
 }

@@ -348,6 +348,9 @@ export function createKoiSchool(textures) {
     // advance the school to time `tnow` (seconds) without drawing, e.g. to have
     // the fish already in the water when a scene first appears
     advance(tnow) { updateKoi(tnow); },
+    // the fish themselves, for drawing them some other way (the Lounge's 3D
+    // koi, loungeKoi.ts): read only
+    fish() { return koi; },
     // advance the school to time `tnow` (seconds) and draw it into `c`
     frame(c, tnow) {
       ctx = c;

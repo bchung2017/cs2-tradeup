@@ -4,7 +4,7 @@ import { TradeupProvider } from "@/lib/tradeup-context";
 import TopRail from "@/components/TopRail";
 import CircuitBoard from "@/components/CircuitBoard";
 import LoungeBackdrop from "@/components/LoungeBackdrop";
-import VentureToast from "@/components/VentureToast";
+import VentureBadge from "@/components/VentureBadge";
 import RegisterSW from "@/components/RegisterSW";
 
 export const metadata: Metadata = {
@@ -49,7 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <TradeupProvider>
           <TopRail />
           {children}
-          <VentureToast />
+          <VentureBadge />
         </TradeupProvider>
         <RegisterSW />
       </body>

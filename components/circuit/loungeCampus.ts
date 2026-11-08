@@ -179,6 +179,47 @@ function flat(p: P[], y: number) {
 const FOG_VERT = `#include <fog_pars_vertex>`;
 const FOG_FRAG = `#include <fog_pars_fragment>`;
 
+// Granite paving: irregular flagstones like the patio's under the bench (a
+// seamless Voronoi tiling), in pale greys with a salt-and-pepper speckle, a
+// faint bevel at each edge and dark grout. One stone per cell of a jittered
+// grid, so each pixel only checks the nine cells round it.
+const GRANITE_TILE = 12; // world units the tile covers: stones the patio's size at the Lounge's scale
+function graniteTile(T: number) {
+  const c = document.createElement("canvas");
+  c.width = c.height = T;
+  const g = c.getContext("2d")!;
+  const img = g.createImageData(T, T), d = img.data;
+  const G = 10, cell = T / G;
+  const h = (i: number, j: number, s: number) => { const v = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453; return v - Math.floor(v); };
+  const tones = ["#a3aaa5", "#979f9a", "#aeb3ad", "#8d9690", "#b6bbb5", "#9ea39a", "#a8aca3", "#929b97"].map((t) => { const n = parseInt(t.slice(1), 16); return { r: (n >> 16) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 }; }); // sRGB, as the canvas is
+  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+    const ci = Math.floor(x / cell), cj = Math.floor(y / cell);
+    let d1 = 1e9, d2 = 1e9, ki = 0, kj = 0;
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+      const i = ci + di, j = cj + dj, ii = (i + G) % G, jj = (j + G) % G; // wrap: the tile repeats seamlessly
+      const sx = (i + 0.15 + 0.7 * h(ii, jj, 1)) * cell, sy = (j + 0.15 + 0.7 * h(ii, jj, 2)) * cell;
+      const dist = Math.hypot(x - sx, y - sy);
+      if (dist < d1) { d2 = d1; d1 = dist; ki = ii; kj = jj; } else if (dist < d2) d2 = dist;
+    }
+    const gap = d2 - d1, o = (y * T + x) * 4;
+    let r: number, gg: number, b: number;
+    if (gap < 2.4) {
+      r = 0.24; gg = 0.27; b = 0.25; // grout
+    } else {
+      const tone = tones[Math.floor(h(ki, kj, 3) * tones.length)];
+      const n = h(x, y, 7), n2 = h(x * 0.5, y * 0.5, 9);
+      let k = 0.94 + 0.08 * n2;
+      if (n < 0.07) k *= 0.55; // dark mica
+      else if (n > 0.95) k *= 1.22; // bright quartz
+      if (gap < 5.5) k *= 0.88; // the bevelled edge
+      r = tone.r * k; gg = tone.g * k; b = tone.b * k;
+    }
+    d[o] = Math.min(255, r * 255); d[o + 1] = Math.min(255, gg * 255); d[o + 2] = Math.min(255, b * 255); d[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
 // `diorama`: the pond with its rock and patio, which the plaza surrounds;
 // `basin`: the pond's outer walls, cut out of the ground.
 export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: number): Campus {
@@ -685,50 +726,23 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     const line = (pts: P[]) => { g.beginPath(); pts.forEach(([x, z], i) => (i ? g.lineTo(px(x), px(z)) : g.moveTo(px(x), px(z)))); };
     const poly = (pts: P[]) => { line(pts); g.closePath(); };
 
-    // streets, then the sidewalk round the court
+    // The paving itself is granite (graniteTile, tiled by the shader below);
+    // this canvas is what's laid over it, transparent where the granite
+    // shows: the streets beyond the sidewalk, joints and inlays, the walks,
+    // grates, decks and baked light.
+    // streets: asphalt everywhere but the court and its sidewalk
     g.fillStyle = "#0b120f";
     g.fillRect(0, 0, S, S);
-    g.fillStyle = "#18201c";
-    g.fillRect(px(cx - HC - 2.5), px(cz - HC - 2.5), (2 * HC + 5) * k, (2 * HC + 5) * k);
+    g.clearRect(px(cx - HC - 2.5), px(cz - HC - 2.5), (2 * HC + 5) * k, (2 * HC + 5) * k);
     g.strokeStyle = "rgba(255,255,255,0.05)";
     g.lineWidth = 1;
     for (let r = HC + 33; r < EXT; r += 30) g.strokeRect(px(cx - r), px(cz - r), 2 * r * k, 2 * r * k);
-    // the court: small dashed pavers laid on a diagonal
-    const pavers = tile(64, (p) => {
-      p.fillStyle = "#1b2520";
-      p.fillRect(0, 0, 64, 64);
-      const tones = ["#25312b", "#2c3a33", "#202b25", "#34433a"];
-      for (let i = 0; i < 80; i++) {
-        const x = rand() * 64, y = rand() * 64, w = 4 + rand() * 7;
-        p.fillStyle = tones[Math.floor(rand() * tones.length)];
-        for (const ox of [-64, 0, 64]) for (const oy of [-64, 0, 64]) {
-          p.beginPath();
-          p.moveTo(x + ox, y + oy); p.lineTo(x + ox + w, y + oy); p.lineTo(x + ox + w + 1.5, y + oy + 1.8); p.lineTo(x + ox + 1.5, y + oy + 1.8);
-          p.fill();
-        }
-      }
-    });
-    pavers.setTransform(new DOMMatrix().rotateSelf(0, 0, pick([0, 45, -30, 60])));
-    g.fillStyle = pavers;
-    g.fillRect(px(cx - HC), px(cz - HC), 2 * HC * k, 2 * HC * k);
-    // the promenade: big slabs
-    g.save();
-    g.beginPath();
-    g.rect(px(cx - HC), px(cz - HC), 2 * HC * k, 2 * HC * k);
-    g.rect(px(cx - HC + PROM), px(cz - HC + PROM), 2 * (HC - PROM) * k, 2 * (HC - PROM) * k);
-    g.clip("evenodd");
-    g.fillStyle = "#222c27";
-    g.fillRect(0, 0, S, S);
-    g.strokeStyle = "rgba(0,0,0,0.35)";
-    for (let v = -EXT; v < EXT; v += 1.2) {
-      g.beginPath(); g.moveTo(px(v), 0); g.lineTo(px(v), S); g.stroke();
-      g.beginPath(); g.moveTo(0, px(v * 2)); g.lineTo(S, px(v * 2)); g.stroke();
-    }
-    g.restore();
-    g.strokeStyle = "#3a4842";
+    // a joint round the sidewalk and round the promenade
+    g.strokeStyle = "rgba(40,48,44,0.7)";
     g.lineWidth = 0.15 * k;
+    g.strokeRect(px(cx - HC), px(cz - HC), 2 * HC * k, 2 * HC * k);
     g.strokeRect(px(cx - HC + PROM), px(cz - HC + PROM), 2 * (HC - PROM) * k, 2 * (HC - PROM) * k);
-    // sweeping inlaid arcs across the court
+    // sweeping inlaid arcs across the court: bands of darker stone
     g.save();
     g.beginPath();
     g.rect(px(cx - HC + PROM), px(cz - HC + PROM), 2 * (HC - PROM) * k, 2 * (HC - PROM) * k);
@@ -736,33 +750,22 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     for (let i = 0; i < 5; i++) {
       const a = rand() * Math.PI * 2, far = 50 + rand() * 70;
       const ox = cx + Math.cos(a) * far, oz = cz + Math.sin(a) * far, r = far + (rand() - 0.5) * HC;
-      for (const [dr, w, s] of [[0, 0.32, "#34433b"], [0.9, 0.12, "#2c3a33"]] as const) {
-        g.strokeStyle = s;
+      for (const [dr, w, st] of [[0, 0.32, "rgba(52,60,56,0.85)"], [0.9, 0.12, "rgba(70,78,74,0.8)"]] as const) {
+        g.strokeStyle = st;
         g.lineWidth = w * k;
         g.beginPath(); g.arc(px(ox), px(oz), (r + dr) * k, 0, Math.PI * 2); g.stroke();
       }
     }
     g.restore();
-    // the plaza: pale slabs with joints radiating from the pond
-    g.fillStyle = "#2a3630";
-    g.fillRect(px(plaza.minX), px(plaza.minZ), 2 * hx * k, 2 * hz * k);
-    g.save();
-    g.beginPath(); g.rect(px(plaza.minX), px(plaza.minZ), 2 * hx * k, 2 * hz * k); g.clip();
-    g.strokeStyle = "rgba(0,0,0,0.3)";
-    g.lineWidth = 1;
-    for (let a = rand(); a < Math.PI * 2; a += 0.12 + rand() * 0.1) {
-      g.beginPath(); g.moveTo(px(cx), px(cz)); g.lineTo(px(cx + Math.cos(a) * 60), px(cz + Math.sin(a) * 60)); g.stroke();
-    }
-    for (let r = 2; r < 40; r += 1.6) { g.beginPath(); g.arc(px(cx), px(cz), r * k, 0, Math.PI * 2); g.stroke(); }
-    g.restore();
-    g.strokeStyle = "#4a5a52";
+    // the plaza round the pond: a darker band at its edge
+    g.strokeStyle = "rgba(48,56,52,0.85)";
     g.lineWidth = 0.2 * k;
     g.strokeRect(px(plaza.minX), px(plaza.minZ), 2 * hx * k, 2 * hz * k);
     // the walks: dark setts between pale kerb lines, a faint glow at the edge
     const setts = tile(16, (p) => {
-      p.fillStyle = "#121915";
+      p.fillStyle = "rgba(30,36,33,0.62)";
       p.fillRect(0, 0, 16, 16);
-      p.fillStyle = "#1a231e";
+      p.fillStyle = "rgba(58,66,62,0.62)";
       for (let y = 0; y < 16; y += 4) for (let x = 0; x < 16; x += 4) p.fillRect(x + ((y / 4) % 2) * 2, y, 3, 3);
     });
     g.lineJoin = "round";
@@ -773,7 +776,7 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
       const [L, R] = strip(sp.pts, sp.w / 2);
       for (const edge of [L, R]) {
         g.strokeStyle = "rgba(80,255,130,0.16)"; g.lineWidth = 0.6 * k; line(edge); g.stroke();
-        g.strokeStyle = "#45544c"; g.lineWidth = 0.16 * k; line(edge); g.stroke();
+        g.strokeStyle = "#cfd4cf"; g.lineWidth = 0.16 * k; line(edge); g.stroke();
       }
       // a slot drain along one side
       g.setLineDash([0.5 * k, 0.25 * k]);
@@ -818,6 +821,11 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     tex.flipY = false;
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
+    tex.premultiplyAlpha = true; // so its edges blend cleanly into the granite at a distance
+    const granite = keep(new THREE.CanvasTexture(graniteTile(512)));
+    granite.wrapS = granite.wrapT = THREE.RepeatWrapping;
+    granite.colorSpace = THREE.SRGBColorSpace;
+    granite.anisotropy = 8;
     const shape = new THREE.Shape();
     shape.moveTo(-EXT, -EXT); shape.lineTo(EXT, -EXT); shape.lineTo(EXT, EXT); shape.lineTo(-EXT, EXT); shape.lineTo(-EXT, -EXT);
     const hole = new THREE.Path();
@@ -833,7 +841,34 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     }
     geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
     geo.computeVertexNormals();
-    group.add(new THREE.Mesh(geo, keep(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }))));
+    const mat = keep(new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { granite: { value: null }, overlay: { value: null }, rep: { value: (2 * EXT) / GRANITE_TILE } }]),
+      fog: true,
+      side: THREE.DoubleSide,
+      vertexShader: `
+        #include <fog_pars_vertex>
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: `
+        #include <fog_pars_fragment>
+        uniform sampler2D granite; uniform sampler2D overlay; uniform float rep;
+        varying vec2 vUv;
+        void main() {
+          vec3 stone = texture2D(granite, vUv * rep).rgb;
+          vec4 over = texture2D(overlay, vUv); // premultiplied
+          gl_FragColor = vec4(stone * (1.0 - over.a) + over.rgb, 1.0);
+          #include <colorspace_fragment>
+          #include <fog_fragment>
+        }`,
+    }));
+    mat.uniforms.granite.value = granite;
+    mat.uniforms.overlay.value = tex;
+    group.add(new THREE.Mesh(geo, mat));
   }
 
   // ── meshes ───────────────────────────────────────────────────────────────

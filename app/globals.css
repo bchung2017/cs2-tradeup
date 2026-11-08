@@ -321,16 +321,6 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 .vx-red__opts { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .vx-red__opts li { display: grid; grid-template-columns: 24px minmax(220px, 1fr) 80px 80px 84px minmax(230px, 1.2fr); gap: 10px; align-items: center; font-size: 12px; }
 
-/* the notification */
-.vx-toast {
-  position: fixed; right: 18px; bottom: 18px; z-index: 50; max-width: 360px;
-  background: var(--surface); border: 1px solid var(--green-dim); box-shadow: 0 0 0 1px rgba(51, 255, 51, 0.15), 0 12px 40px rgba(0, 0, 0, 0.8);
-  padding: 12px 14px; font-size: 13px; color: var(--fg); line-height: 1.5;
-  animation: vx-in 260ms ease-out;
-}
-.vx-toast a { color: var(--green); }
-.vx-toast__x { position: absolute; top: 4px; right: 6px; background: none; border: none; color: var(--fg-faint); cursor: pointer; font-size: 14px; }
-@keyframes vx-in { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 @media (max-width: 1100px) {
   /* results stay on the right: inputs | donut + top four | entry */
@@ -349,9 +339,7 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
   .vx-strip__slots .vx-skin { width: 30px !important; }
   .vx-table { font-size: 11px; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .vx-toast { animation: none; }
-}
+@keyframes vx-in { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* skin pictures: one per distinct skin, with its count */
 .vx-stack { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; margin: 2px 0 4px; }
