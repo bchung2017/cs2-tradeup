@@ -308,9 +308,12 @@ export async function createLounge(
     // standing a step back from the front-left corner, the rim in the
     // foreground, looking down the pond's clear left side to the foot of the
     // waterfall (the ramp crosses further right)
-    const eye = new THREE.Vector3(-W / 2 + Math.min(1.2, W * 0.15), RIM + EYE, DEPTH / 2 + 1.6);
+    // on a narrow screen, well back and a little higher, so the whole sign
+    // fits across the screen above the bonsai
+    const tall = camera.aspect < 1;
+    const eye = new THREE.Vector3(-W / 2 + Math.min(1.2, W * 0.15), RIM + EYE + (tall ? 2.6 : 0), DEPTH / 2 + (tall ? 16 : 1.6)); // (any further and it would stand inside the towers on that side)
     // the gaze lifted a little, so the sign shows over the rock
-    edge.target.set(-W * 0.2 + 0.4, WATER_Y + 3.0, -DEPTH / 2 + 1.0);
+    edge.target.set(tall ? 1.6 : -W * 0.2 + 0.4, WATER_Y + (tall ? 5.2 : 3.4), -DEPTH / 2 + 1.0);
     const d = eye.clone().sub(edge.target);
     edge.dist = d.length();
     edge.polar = Math.acos(d.y / edge.dist);

@@ -671,10 +671,12 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
   // ── the building: one massive headquarters behind the pond ───────────────
   // On the far side of the plaza, where both the Lounge view and the pool's
   // edge look: a stone podium, a glass curtain-wall tower with chamfered
-  // corners, a finned crown, and the Venture Studios sign on its face, with
-  // "A DIK Industries division" on the podium below.
+  // corners, a finned crown, and the Venture Studios sign on its face with
+  // "A DIK Industries division" right under it. Around it, the skyline of
+  // smaller towers fills the rest of the view.
   const towerParts: THREE.BufferGeometry[] = [];
   const signs: { x: number; y: number; z: number; w: number; h: number; kind: "logo" | "dik" }[] = [];
+  const hq = { x0: 0, x1: 0, z0: 0, z1: 0 }; // its footprint, kept clear of the other towers
   {
     let id = 0;
     const part = (poly: P[], y0: number, y1: number, type: number) => {
@@ -693,12 +695,77 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     part(box(mx, mz, BW, BD, 0), Y, Y + PH, 1); // the podium
     part(box(mx, mz, BW - 2 * IN, BD - 2 * IN, 5), Y + PH, Y + BH, 0); // the tower
     part(box(mx, mz, BW * 0.7, BD * 0.6, 3), Y + BH, Y + BH + 9, 2); // the crown
-    // the signs: the logo across the tower's face, the division line on the podium
+    hq.x0 = mx - BW / 2; hq.x1 = mx + BW / 2; hq.z0 = front - BD; hq.z1 = front;
+    // the signs on the tower's face: the logo, high enough to clear the
+    // waterfall rock from the pool's edge, and the division line right under it
     const SW = Math.min(BW * 0.62, 40), SH = SW / LOGO_ASPECT;
-    signs.push({ x: mx, y: Y + PH + 14 + SH / 2, // high enough to clear the waterfall rock from the pool's edge
-      z: front - IN + 0.3, w: SW, h: SH, kind: "logo" });
-    const DW = Math.min(BW * 0.42, 34);
-    signs.push({ x: mx, y: Y + PH * 0.5, z: front + 0.3, w: DW, h: DW / 8, kind: "dik" });
+    const DW = SW * 0.8, DH = DW / 8;
+    const logoY = Y + PH + 14 + DH + 1.5 + SH / 2;
+    signs.push({ x: mx, y: logoY, z: front - IN + 0.3, w: SW, h: SH, kind: "logo" });
+    signs.push({ x: mx, y: logoY - SH / 2 - 0.6 - DH / 2, z: front - IN + 0.3, w: DW, h: DH, kind: "dik" });
+  }
+
+
+  // the rest of the skyline: two rows of smaller towers on every side
+  {
+    const exits: number[][] = [[], [], [], []];
+    const SIDES: [P, P][] = [[[0, -1], [1, 0]], [[1, 0], [0, 1]], [[0, 1], [1, 0]], [[-1, 0], [0, 1]]];
+    for (const sp of spines) exits[sp.side].push(SIDES[sp.side][1][0] * (sp.end[0] - cx) + SIDES[sp.side][1][1] * (sp.end[1] - cz));
+    // the camera looks from +z, a little -x: towers on that side stay low
+    const cam: P = [-0.42, 0.9];
+    let id = 100; // after the headquarters' own ids
+    const part = (poly: P[], y0: number, y1: number, type: number) => {
+      const g = prism(poly, null, y0, y1);
+      g.deleteAttribute("uv");
+      const n = g.attributes.position.count;
+      g.setAttribute("aId", new THREE.BufferAttribute(new Float32Array(n).fill(id), 1));
+      g.setAttribute("aType", new THREE.BufferAttribute(new Float32Array(n).fill(type), 1));
+      towerParts.push(g);
+    };
+    const foot = (mx: number, mz: number, t: P, n: P, w: number, d: number, cut: number): P[] => {
+      const local: P[] = cut > 0
+        ? [[-w / 2 + cut, -d / 2], [w / 2 - cut, -d / 2], [w / 2, -d / 2 + cut], [w / 2, d / 2 - cut], [w / 2 - cut, d / 2], [-w / 2 + cut, d / 2], [-w / 2, d / 2 - cut], [-w / 2, -d / 2 + cut]]
+        : [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]];
+      return local.map(([u, v]) => [mx + t[0] * u + n[0] * v, mz + t[1] * u + n[1] * v]);
+    };
+    for (let s = 0; s < 4; s++) {
+      const [n, t] = SIDES[s];
+      const facing = n[0] * cam[0] + n[1] * cam[1];
+      const cap = facing > 0.6 ? 7 : facing > 0.3 ? 24 : 999;
+      for (let row = 0; row < 2; row++) {
+        const front = HC + 2.5 + row * 30;
+        const span = s % 2 === 0 ? (row ? HC + 46 : HC + 17) : (row ? HC + 31 : HC + 1.5);
+        for (let u = -span; u < span - 5; ) {
+          let w = 9 + rand() * 13;
+          if (u + w > span) w = span - u;
+          const ex = row === 0 ? exits[s].find((e) => e > u - 4 && e < u + w + 4) : undefined;
+          if (ex !== undefined) { u = ex + 4.5; continue; }
+          const d = row ? 14 + rand() * 14 : 10 + rand() * 12;
+          const mx = cx + n[0] * (front + d / 2) + t[0] * (u + w / 2), mz = cz + n[1] * (front + d / 2) + t[1] * (u + w / 2);
+          // nothing inside (or right up against) the headquarters
+          const ex2 = Math.abs(t[0]) * w / 2 + Math.abs(n[0]) * d / 2 + 2, ez2 = Math.abs(t[1]) * w / 2 + Math.abs(n[1]) * d / 2 + 2;
+          if (mx + ex2 > hq.x0 && mx - ex2 < hq.x1 && mz + ez2 > hq.z0 && mz - ez2 < hq.z1) { u += w + 1.5; continue; }
+          const h = Math.min(cap, row ? 30 + rand() * 55 : 16 + rand() * 36);
+          const type = rand() < 0.5 ? 0 : rand() < 0.5 ? 1 : 2;
+          const cut = rand() < 0.3 ? Math.min(w, d) * 0.18 : 0;
+          id++;
+          if (h > 20 && rand() < 0.4) {
+            // a stone podium with a glass tower set back on it
+            const ph = 5 + rand() * 3, inset = 1.5 + rand();
+            part(foot(mx, mz, t, n, w, d, 0), Y, Y + ph, 1);
+            part(foot(mx, mz, t, n, w - 2 * inset, d - 2 * inset, cut), Y + ph, Y + h, type === 1 ? 0 : type);
+          } else if (h > 24 && rand() < 0.35) {
+            // stepped back near the top
+            const h1 = h * (0.7 + rand() * 0.12);
+            part(foot(mx, mz, t, n, w, d, cut), Y, Y + h1, type);
+            part(foot(mx, mz, t, n, w * 0.7, d * 0.7, cut * 0.7), Y + h1, Y + h, type);
+          } else {
+            part(foot(mx, mz, t, n, w, d, cut), Y, Y + h, type);
+          }
+          u += w + 1.5 + rand() * 3;
+        }
+      }
+    }
   }
 
   // ── the ground: one textured plane with the pond cut out ─────────────────
