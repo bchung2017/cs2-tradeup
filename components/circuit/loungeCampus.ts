@@ -179,50 +179,11 @@ function flat(p: P[], y: number) {
 const FOG_VERT = `#include <fog_pars_vertex>`;
 const FOG_FRAG = `#include <fog_pars_fragment>`;
 
-// Granite paving: irregular flagstones like the patio's under the bench (a
-// seamless Voronoi tiling), in pale greys with a salt-and-pepper speckle, a
-// faint bevel at each edge and dark grout. One stone per cell of a jittered
-// grid, so each pixel only checks the nine cells round it.
-const GRANITE_TILE = 12; // world units the tile covers: stones the patio's size at the Lounge's scale
-function graniteTile(T: number) {
-  const c = document.createElement("canvas");
-  c.width = c.height = T;
-  const g = c.getContext("2d")!;
-  const img = g.createImageData(T, T), d = img.data;
-  const G = 10, cell = T / G;
-  const h = (i: number, j: number, s: number) => { const v = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453; return v - Math.floor(v); };
-  const tones = ["#a3aaa5", "#979f9a", "#aeb3ad", "#8d9690", "#b6bbb5", "#9ea39a", "#a8aca3", "#929b97"].map((t) => { const n = parseInt(t.slice(1), 16); return { r: (n >> 16) / 255, g: ((n >> 8) & 255) / 255, b: (n & 255) / 255 }; }); // sRGB, as the canvas is
-  for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
-    const ci = Math.floor(x / cell), cj = Math.floor(y / cell);
-    let d1 = 1e9, d2 = 1e9, ki = 0, kj = 0;
-    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
-      const i = ci + di, j = cj + dj, ii = (i + G) % G, jj = (j + G) % G; // wrap: the tile repeats seamlessly
-      const sx = (i + 0.15 + 0.7 * h(ii, jj, 1)) * cell, sy = (j + 0.15 + 0.7 * h(ii, jj, 2)) * cell;
-      const dist = Math.hypot(x - sx, y - sy);
-      if (dist < d1) { d2 = d1; d1 = dist; ki = ii; kj = jj; } else if (dist < d2) d2 = dist;
-    }
-    const gap = d2 - d1, o = (y * T + x) * 4;
-    let r: number, gg: number, b: number;
-    if (gap < 2.4) {
-      r = 0.24; gg = 0.27; b = 0.25; // grout
-    } else {
-      const tone = tones[Math.floor(h(ki, kj, 3) * tones.length)];
-      const n = h(x, y, 7), n2 = h(x * 0.5, y * 0.5, 9);
-      let k = 0.94 + 0.08 * n2;
-      if (n < 0.07) k *= 0.55; // dark mica
-      else if (n > 0.95) k *= 1.22; // bright quartz
-      if (gap < 5.5) k *= 0.88; // the bevelled edge
-      r = tone.r * k; gg = tone.g * k; b = tone.b * k;
-    }
-    d[o] = Math.min(255, r * 255); d[o + 1] = Math.min(255, gg * 255); d[o + 2] = Math.min(255, b * 255); d[o + 3] = 255;
-  }
-  g.putImageData(img, 0, 0);
-  return c;
-}
-
 // `diorama`: the pond with its rock and patio, which the plaza surrounds;
-// `basin`: the pond's outer walls, cut out of the ground.
-export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: number): Campus {
+// `basin`: the pond's outer walls, cut out of the ground; `paving`: the
+// patio's flagstone tile (loungeScenery.ts) and the size it repeats at, in
+// this campus's units, which the whole ground is paved with.
+export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: number, paving: { image: HTMLCanvasElement; size: number }): Campus {
   const rand = rng(seed);
   const pick = <T,>(a: T[]) => a[Math.floor(rand() * a.length)];
   const group = new THREE.Group();
@@ -726,9 +687,8 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     const line = (pts: P[]) => { g.beginPath(); pts.forEach(([x, z], i) => (i ? g.lineTo(px(x), px(z)) : g.moveTo(px(x), px(z)))); };
     const poly = (pts: P[]) => { line(pts); g.closePath(); };
 
-    // The paving itself is granite (graniteTile, tiled by the shader below);
-    // this canvas is what's laid over it, transparent where the granite
-    // shows: the streets beyond the sidewalk, joints and inlays, the walks,
+    // The paving itself is the patio's flagstone (tiled by the shader below);
+    // this canvas is what's laid over it, transparent where the stone shows: the streets beyond the sidewalk, joints and inlays, the walks,
     // grates, decks and baked light.
     // streets: asphalt everywhere but the court and its sidewalk
     g.fillStyle = "#0b120f";
@@ -821,11 +781,11 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     tex.flipY = false;
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 8;
-    tex.premultiplyAlpha = true; // so its edges blend cleanly into the granite at a distance
-    const granite = keep(new THREE.CanvasTexture(graniteTile(512)));
-    granite.wrapS = granite.wrapT = THREE.RepeatWrapping;
-    granite.colorSpace = THREE.SRGBColorSpace;
-    granite.anisotropy = 8;
+    tex.premultiplyAlpha = true; // so its edges blend cleanly into the stone at a distance
+    const stoneTex = keep(new THREE.CanvasTexture(paving.image));
+    stoneTex.wrapS = stoneTex.wrapT = THREE.RepeatWrapping;
+    stoneTex.colorSpace = THREE.SRGBColorSpace;
+    stoneTex.anisotropy = 8;
     const shape = new THREE.Shape();
     shape.moveTo(-EXT, -EXT); shape.lineTo(EXT, -EXT); shape.lineTo(EXT, EXT); shape.lineTo(-EXT, EXT); shape.lineTo(-EXT, -EXT);
     const hole = new THREE.Path();
@@ -842,7 +802,7 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
     geo.computeVertexNormals();
     const mat = keep(new THREE.ShaderMaterial({
-      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { granite: { value: null }, overlay: { value: null }, rep: { value: (2 * EXT) / GRANITE_TILE } }]),
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { stone: { value: null }, overlay: { value: null }, rep: { value: (2 * EXT) / paving.size } }]),
       fog: true,
       side: THREE.DoubleSide,
       vertexShader: `
@@ -856,17 +816,21 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
         }`,
       fragmentShader: `
         #include <fog_pars_fragment>
-        uniform sampler2D granite; uniform sampler2D overlay; uniform float rep;
+        uniform sampler2D stone; uniform sampler2D overlay; uniform float rep;
         varying vec2 vUv;
         void main() {
-          vec3 stone = texture2D(granite, vUv * rep).rgb;
+          // the patio's flagstones exactly as the patio shows them in the
+          // Lounge (loungeScenery.ts, fillable): their brightness as pale
+          // stone, lit like a level top face
+          float lum = dot(texture2D(stone, vUv * rep).rgb, vec3(0.3, 0.59, 0.11));
+          vec3 paved = (vec3(0.16, 0.18, 0.17) + lum * vec3(1.1, 1.2, 1.15)) * 1.076;
           vec4 over = texture2D(overlay, vUv); // premultiplied
-          gl_FragColor = vec4(stone * (1.0 - over.a) + over.rgb, 1.0);
+          gl_FragColor = vec4(paved * (1.0 - over.a) + over.rgb, 1.0);
           #include <colorspace_fragment>
           #include <fog_fragment>
         }`,
     }));
-    mat.uniforms.granite.value = granite;
+    mat.uniforms.stone.value = stoneTex;
     mat.uniforms.overlay.value = tex;
     group.add(new THREE.Mesh(geo, mat));
   }

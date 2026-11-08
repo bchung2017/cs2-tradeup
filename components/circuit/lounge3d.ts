@@ -74,7 +74,7 @@ export async function createLounge(
   // parts bloomed, then tone and colour space for the screen
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 1.1, 0.55, 1.0);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.22, 0.55, 1.0); // a soft glow
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -232,6 +232,7 @@ export async function createLounge(
       { minX: (-W / 2 - t) * k, maxX: (W / 2 + t) * k, minZ: (-DEPTH / 2 - t) * k, maxZ: (DEPTH / 2 + t) * k },
       RIM * k,
       campusSeed,
+      { image: scenery.paving.image, size: scenery.paving.size * k },
     );
     campus.group.scale.setScalar(1 / k);
     scene.add(campus.group);
