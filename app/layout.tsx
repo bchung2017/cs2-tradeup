@@ -1,10 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { TradeupProvider } from "@/lib/tradeup-context";
-import TopRail from "@/components/TopRail";
 import CircuitBoard from "@/components/CircuitBoard";
 import LoungeBackdrop from "@/components/LoungeBackdrop";
-import VentureBadge from "@/components/VentureBadge";
 import RegisterSW from "@/components/RegisterSW";
 
 export const metadata: Metadata = {
@@ -46,11 +44,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             never remounts on navigation. */}
         <CircuitBoard />
         <LoungeBackdrop />
-        <TradeupProvider>
-          <TopRail />
-          {children}
-          <VentureBadge />
-        </TradeupProvider>
+        {/* The site is the Lounge alone for now: the nav (TopRail) and the
+            Venture badge are left out, and every other page redirects home
+            (next.config.mjs). Their code stays; put them back to reconnect. */}
+        <TradeupProvider>{children}</TradeupProvider>
         <RegisterSW />
       </body>
     </html>

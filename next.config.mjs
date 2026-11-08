@@ -21,12 +21,15 @@ const nextConfig = {
   },
   // The homepage is the Lounge from the pool's edge (app/page.tsx); the
   // trade-up simulator lives at /simulator.
+  // The site is the Lounge alone for now (the homepage). Every other page is
+  // disconnected: its code stays, but its address sends you home. Temporary
+  // redirects, so browsers don't remember them once the pages come back.
   async redirects() {
-    return [
-      // the trade-up console was renamed the simulator; keep old links and
-      // installed-app shortcuts working
-      { source: "/console", destination: "/simulator", permanent: true },
-    ];
+    return ["/console", "/simulator", "/inventory", "/profile", "/lounge", "/venture", "/venture/:path*"].map((source) => ({
+      source,
+      destination: "/",
+      permanent: false,
+    }));
   },
 };
 export default nextConfig;
