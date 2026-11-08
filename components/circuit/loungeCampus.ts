@@ -695,7 +695,8 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     part(box(mx, mz, BW * 0.7, BD * 0.6, 3), Y + BH, Y + BH + 9, 2); // the crown
     // the signs: the logo across the tower's face, the division line on the podium
     const SW = Math.min(BW * 0.62, 40), SH = SW / LOGO_ASPECT;
-    signs.push({ x: mx, y: Y + PH + 6 + SH / 2, z: front - IN + 0.3, w: SW, h: SH, kind: "logo" });
+    signs.push({ x: mx, y: Y + PH + 14 + SH / 2, // high enough to clear the waterfall rock from the pool's edge
+      z: front - IN + 0.3, w: SW, h: SH, kind: "logo" });
     const DW = Math.min(BW * 0.42, 34);
     signs.push({ x: mx, y: Y + PH * 0.5, z: front + 0.3, w: DW, h: DW / 8, kind: "dik" });
   }

@@ -310,7 +310,7 @@ export async function createLounge(
     // waterfall (the ramp crosses further right)
     const eye = new THREE.Vector3(-W / 2 + Math.min(1.2, W * 0.15), RIM + EYE, DEPTH / 2 + 1.6);
     // the gaze lifted a little, so the sign shows over the rock
-    edge.target.set(-W * 0.2 + 0.4, WATER_Y + 2.3, -DEPTH / 2 + 1.0);
+    edge.target.set(-W * 0.2 + 0.4, WATER_Y + 3.0, -DEPTH / 2 + 1.0);
     const d = eye.clone().sub(edge.target);
     edge.dist = d.length();
     edge.polar = Math.acos(d.y / edge.dist);
