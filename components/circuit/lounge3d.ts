@@ -261,6 +261,9 @@ export async function createLounge(
     all.getCenter(isoTarget);
     const corners: THREE.Vector3[] = [];
     for (const box of boxes) for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z));
+    // and the headquarters' sign behind the pond, so it's always in the shot
+    const cs = campus?.group.scale.x ?? 1;
+    for (const p of campus?.landmarks ?? []) corners.push(p.clone().multiplyScalar(cs));
     // portrait: the pond's long side runs front to back, so look along it
     POLAR = ((camera.aspect < 1 ? 46 : 50) * Math.PI) / 180;
     AZIM = ((camera.aspect < 1 ? -16 : -38) * Math.PI) / 180;
@@ -301,12 +304,13 @@ export async function createLounge(
     }
     // pull back past the diorama so the campus around it shows: the pond
     // stays the centrepiece, the campus fills the rest of the screen
-    isoDist *= camera.aspect < 1 ? 1.3 : 1.4;
+    isoDist *= camera.aspect < 1 ? 1.12 : 1.08; // a little room round the pond and the sign
     // standing a step back from the front-left corner, the rim in the
     // foreground, looking down the pond's clear left side to the foot of the
     // waterfall (the ramp crosses further right)
     const eye = new THREE.Vector3(-W / 2 + Math.min(1.2, W * 0.15), RIM + EYE, DEPTH / 2 + 1.6);
-    edge.target.set(-W * 0.2 + 0.4, WATER_Y + 0.6, -DEPTH / 2 + 1.0);
+    // the gaze lifted a little, so the sign shows over the rock
+    edge.target.set(-W * 0.2 + 0.4, WATER_Y + 2.3, -DEPTH / 2 + 1.0);
     const d = eye.clone().sub(edge.target);
     edge.dist = d.length();
     edge.polar = Math.acos(d.y / edge.dist);

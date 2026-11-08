@@ -29,6 +29,9 @@ const GREEN = 0x33ff33;
 export interface Bounds { minX: number; maxX: number; minZ: number; maxZ: number }
 export interface Campus {
   group: THREE.Group;
+  // the Venture Studios sign's corners, in the campus's own units: the
+  // Lounge's camera keeps it in frame
+  landmarks: THREE.Vector3[];
   update(time: number, s: number): void;
   dispose(): void;
 }
@@ -178,6 +181,62 @@ function flat(p: P[], y: number) {
 
 const FOG_VERT = `#include <fog_pars_vertex>`;
 const FOG_FRAG = `#include <fog_pars_fragment>`;
+
+// The building's signs. The Venture Studios logo (public/lounge/
+// venture-studios.png) is gold on black: drawn additively, the black adds
+// nothing and the gold, lifted a little past white, catches the bloom. Only
+// the logo's middle is used (the picture has wide black margins).
+const LOGO_RECT = { u: 180 / 1168, v: 1 - 630 / 784, w: 810 / 1168, h: 535 / 784 };
+const LOGO_ASPECT = 810 / 535; // the crop's width over height, in pixels
+const SIGN_FRAG = /* glsl */ `
+  uniform sampler2D map; uniform vec4 rect; uniform float gain;
+  varying vec2 vUv;
+  void main() {
+    vec3 c = texture2D(map, rect.xy + vUv * rect.zw).rgb;
+    gl_FragColor = vec4(c * gain, 1.0);
+    #include <colorspace_fragment>
+  }`;
+function makeSign(sg: { x: number; y: number; z: number; w: number; h: number; kind: "logo" | "dik" }, keep: <T extends { dispose(): void }>(x: T) => T) {
+  let tex: THREE.Texture, rect: THREE.Vector4, gain: number;
+  if (sg.kind === "logo") {
+    tex = keep(new THREE.TextureLoader().load("/lounge/venture-studios.png"));
+    rect = new THREE.Vector4(LOGO_RECT.u, LOGO_RECT.v, LOGO_RECT.w, LOGO_RECT.h);
+    gain = 1.6;
+  } else {
+    // the DIK Industries white rabbit (public/lounge/dik-rabbit.svg), then
+    // "A DIK Industries division", in white
+    const c = document.createElement("canvas");
+    c.width = 1024; c.height = 128;
+    const g = c.getContext("2d")!;
+    g.fillStyle = "#ffffff";
+    g.font = "500 52px Georgia, 'Times New Roman', serif";
+    g.textBaseline = "middle";
+    g.textAlign = "center";
+    g.fillText("A DIK INDUSTRIES DIVISION", 600, 66);
+    const canvasTex = keep(new THREE.CanvasTexture(c));
+    const rabbit = new Image();
+    rabbit.onload = () => {
+      const h = 100, w = (h * 100) / 77.8; // the mark's viewBox is 100 x 77.8
+      g.drawImage(rabbit, 60, 64 - h / 2, w, h);
+      canvasTex.needsUpdate = true;
+    };
+    rabbit.src = "/lounge/dik-rabbit.svg";
+    tex = canvasTex;
+    rect = new THREE.Vector4(0, 0, 1, 1);
+    gain = 1.05;
+  }
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  const mat = keep(new THREE.ShaderMaterial({
+    uniforms: { map: { value: tex }, rect: { value: rect }, gain: { value: gain } },
+    vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: SIGN_FRAG,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  }));
+  const m = new THREE.Mesh(keep(new THREE.PlaneGeometry(sg.w, sg.h)), mat);
+  m.position.set(sg.x, sg.y, sg.z);
+  return m;
+}
 
 // `diorama`: the pond with its rock and patio, which the plaza surrounds;
 // `basin`: the pond's outer walls, cut out of the ground; `paving`: the
@@ -609,14 +668,14 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     else for (let i = 0; i < 3; i++) grasses.push({ x: p.x + (rand() - 0.5) * 0.4, y: p.y + 0.72, z: p.z + (rand() - 0.5) * 0.4, s: 0.7, sy: 0.9 + rand() * 0.5, c: pick(grassTones) });
   }
 
-  // ── towers ───────────────────────────────────────────────────────────────
+  // ── the building: one massive headquarters behind the pond ───────────────
+  // On the far side of the plaza, where both the Lounge view and the pool's
+  // edge look: a stone podium, a glass curtain-wall tower with chamfered
+  // corners, a finned crown, and the Venture Studios sign on its face, with
+  // "A DIK Industries division" on the podium below.
   const towerParts: THREE.BufferGeometry[] = [];
+  const signs: { x: number; y: number; z: number; w: number; h: number; kind: "logo" | "dik" }[] = [];
   {
-    const exits: number[][] = [[], [], [], []];
-    const SIDES: [P, P][] = [[[0, -1], [1, 0]], [[1, 0], [0, 1]], [[0, 1], [1, 0]], [[-1, 0], [0, 1]]];
-    for (const sp of spines) exits[sp.side].push(SIDES[sp.side][1][0] * (sp.end[0] - cx) + SIDES[sp.side][1][1] * (sp.end[1] - cz));
-    // the camera looks from +z, a little -x: towers on that side stay low
-    const cam: P = [-0.42, 0.9];
     let id = 0;
     const part = (poly: P[], y0: number, y1: number, type: number) => {
       const g = prism(poly, null, y0, y1);
@@ -626,47 +685,19 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
       g.setAttribute("aType", new THREE.BufferAttribute(new Float32Array(n).fill(type), 1));
       towerParts.push(g);
     };
-    const foot = (mx: number, mz: number, t: P, n: P, w: number, d: number, cut: number): P[] => {
-      const local: P[] = cut > 0
-        ? [[-w / 2 + cut, -d / 2], [w / 2 - cut, -d / 2], [w / 2, -d / 2 + cut], [w / 2, d / 2 - cut], [w / 2 - cut, d / 2], [-w / 2 + cut, d / 2], [-w / 2, d / 2 - cut], [-w / 2, -d / 2 + cut]]
-        : [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]];
-      return local.map(([u, v]) => [mx + t[0] * u + n[0] * v, mz + t[1] * u + n[1] * v]);
-    };
-    for (let s = 0; s < 4; s++) {
-      const [n, t] = SIDES[s];
-      const facing = n[0] * cam[0] + n[1] * cam[1];
-      const cap = facing > 0.6 ? 7 : facing > 0.3 ? 24 : 999;
-      for (let row = 0; row < 2; row++) {
-        const front = HC + 2.5 + row * 30;
-        const span = s % 2 === 0 ? (row ? HC + 46 : HC + 17) : (row ? HC + 31 : HC + 1.5);
-        for (let u = -span; u < span - 5; ) {
-          let w = 9 + rand() * 13;
-          if (u + w > span) w = span - u;
-          const ex = row === 0 ? exits[s].find((e) => e > u - 4 && e < u + w + 4) : undefined;
-          if (ex !== undefined) { u = ex + 4.5; continue; }
-          const d = row ? 14 + rand() * 14 : 10 + rand() * 12;
-          const mx = cx + n[0] * (front + d / 2) + t[0] * (u + w / 2), mz = cz + n[1] * (front + d / 2) + t[1] * (u + w / 2);
-          const h = Math.min(cap, row ? 30 + rand() * 55 : 16 + rand() * 36);
-          const type = rand() < 0.5 ? 0 : rand() < 0.5 ? 1 : 2;
-          const cut = rand() < 0.3 ? Math.min(w, d) * 0.18 : 0;
-          id++;
-          if (h > 20 && rand() < 0.4) {
-            // a stone podium with a glass tower set back on it
-            const ph = 5 + rand() * 3, inset = 1.5 + rand();
-            part(foot(mx, mz, t, n, w, d, 0), Y, Y + ph, 1);
-            part(foot(mx, mz, t, n, w - 2 * inset, d - 2 * inset, cut), Y + ph, Y + h, type === 1 ? 0 : type);
-          } else if (h > 24 && rand() < 0.35) {
-            // stepped back near the top
-            const h1 = h * (0.7 + rand() * 0.12);
-            part(foot(mx, mz, t, n, w, d, cut), Y, Y + h1, type);
-            part(foot(mx, mz, t, n, w * 0.7, d * 0.7, cut * 0.7), Y + h1, Y + h, type);
-          } else {
-            part(foot(mx, mz, t, n, w, d, cut), Y, Y + h, type);
-          }
-          u += w + 1.5 + rand() * 3;
-        }
-      }
-    }
+    const box = (mx: number, mz: number, w: number, d: number, cut: number): P[] => (cut > 0
+      ? [[-w / 2 + cut, -d / 2], [w / 2 - cut, -d / 2], [w / 2, -d / 2 + cut], [w / 2, d / 2 - cut], [w / 2 - cut, d / 2], [-w / 2 + cut, d / 2], [-w / 2, d / 2 - cut], [-w / 2, -d / 2 + cut]]
+      : [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]]).map(([u, v]) => [mx + u, mz + v] as P);
+    const BW = 2 * HC * 0.92, BD = 30, PH = 12, BH = 112, IN = 2.5;
+    const front = cz - HC - 3, mx = cx + HC * 0.08, mz = front - BD / 2;
+    part(box(mx, mz, BW, BD, 0), Y, Y + PH, 1); // the podium
+    part(box(mx, mz, BW - 2 * IN, BD - 2 * IN, 5), Y + PH, Y + BH, 0); // the tower
+    part(box(mx, mz, BW * 0.7, BD * 0.6, 3), Y + BH, Y + BH + 9, 2); // the crown
+    // the signs: the logo across the tower's face, the division line on the podium
+    const SW = Math.min(BW * 0.62, 40), SH = SW / LOGO_ASPECT;
+    signs.push({ x: mx, y: Y + PH + 6 + SH / 2, z: front - IN + 0.3, w: SW, h: SH, kind: "logo" });
+    const DW = Math.min(BW * 0.42, 34);
+    signs.push({ x: mx, y: Y + PH * 0.5, z: front + 0.3, w: DW, h: DW / 8, kind: "dik" });
   }
 
   // ── the ground: one textured plane with the pond cut out ─────────────────
@@ -990,13 +1021,14 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
   group.add(near);
   risers.push([near, 0]);
 
-  // towers: one mesh; the shader draws curtain walls, punched windows or fins
+  // the building: one mesh; the shader draws curtain wall, stone or fins
+  // (no fog: it's the backdrop, and its sign must read)
   if (towerParts.length) {
     const geo = keep(mergeGeometries(towerParts)!);
     for (const p of towerParts) p.dispose();
     const mat = keep(new THREE.ShaderMaterial({
       uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uY: { value: Y } }]),
-      fog: true,
+      fog: false,
       vertexShader: `
         ${FOG_VERT}
         attribute float aId; attribute float aType;
@@ -1055,13 +1087,19 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     }));
     const towers = new THREE.Group();
     towers.add(new THREE.Mesh(geo, mat));
+    for (const sg of signs) towers.add(makeSign(sg, keep));
     towers.add(new THREE.LineSegments(keep(new THREE.EdgesGeometry(geo, 30)), keep(new THREE.LineBasicMaterial({ color: GREEN, transparent: true, opacity: 0.28 }))));
     group.add(towers);
     risers.push([towers, HC]);
   }
 
+  const logo = signs.find((sg) => sg.kind === "logo");
+  const landmarks = logo
+    ? [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => new THREE.Vector3(logo.x + (a * logo.w) / 2, logo.y + (b * logo.h) / 2, logo.z))
+    : [];
   return {
     group,
+    landmarks,
     update(time, s) {
       group.visible = s > 0.002;
       // rise into place: the court first, the towers last
