@@ -8,13 +8,19 @@
 // the scene is assembled a step at a time behind a loading bar (the page stays
 // responsive), and only once everything is ready does the camera start moving,
 // so the move is smooth. Later visits start at once.
+//
+// The homepage is the Lounge too, seen from the pool's edge instead of from
+// above (setEdgeView).
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import type { Lounge } from "./circuit/lounge3d";
 
 export default function LoungeBackdrop() {
   const pathname = usePathname();
-  const inLounge = pathname === "/lounge";
+  const isHome = pathname === "/";
+  const inLounge = pathname === "/lounge" || isHome;
+  const isHomeRef = useRef(isHome);
+  isHomeRef.current = isHome;
   const inLoungeRef = useRef(inLounge);
   inLoungeRef.current = inLounge;
   const ref = useRef<HTMLCanvasElement>(null);
@@ -25,6 +31,7 @@ export default function LoungeBackdrop() {
 
   useEffect(() => {
     if (lounge.current) {
+      lounge.current.setEdgeView(isHome);
       lounge.current.setInLounge(inLounge);
       return;
     }
@@ -41,6 +48,7 @@ export default function LoungeBackdrop() {
         lounge.current = l;
         setProgress(null);
         // left while it was loading: stay flat until the next visit
+        l.setEdgeView(isHomeRef.current);
         l.setInLounge(inLoungeRef.current);
       } catch (e) {
         console.error("Lounge failed to load", e);
@@ -49,7 +57,7 @@ export default function LoungeBackdrop() {
         loading.current = false;
       }
     })();
-  }, [inLounge]);
+  }, [inLounge, isHome]);
 
   useEffect(() => () => lounge.current?.destroy(), []);
 

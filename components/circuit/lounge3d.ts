@@ -8,6 +8,10 @@
 //   basin   the pond's walls, edged in glowing green, rising as the camera tilts
 //   scenery     rock face, spring, waterfall, bonsai, patio and ramp
 //               (loungeScenery.ts)
+//   campus      the plaza and towers around it (loungeCampus.ts)
+// The camera has two places to end up: the Lounge's raised three-quarter view
+// (/lounge), or standing at the pool's front edge at about eye height,
+// looking across the water to the rock and the waterfall (the homepage).
 // Building it is split into small steps with a frame between each
 // (createLounge reports progress for the loading bar), so the page never
 // freezes, and everything is compiled and on the GPU before the camera moves.
@@ -26,6 +30,8 @@ const KOI_Y = 0.55; // the koi swim between the floor and the surface
 const RIM = 1.6; // basin wall height
 const POND_SCALE = 2.2; // how much larger the pond and rock feature are than the campus's scale
 const TRANSITION_S = 1.8; // seconds, top-down ↔ three-quarter
+const EYE = 0.85; // eye height above the plaza, at the campus's scale (a person, POND_SCALE smaller)
+const EDGE_FOV = 52; // a wider lens when standing at the edge
 const KOI_RES = 0.5; // the koi layer's pixels per screen pixel
 const FLOOR_RES = 0.75; // the floor's
 
@@ -34,6 +40,7 @@ const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => set
 
 export interface Lounge {
   setInLounge(on: boolean): void;
+  setEdgeView(on: boolean): void; // stand at the pool's edge instead of above it
   destroy(): void;
 }
 
@@ -227,7 +234,11 @@ export async function createLounge(
   let POLAR = (50 * Math.PI) / 180; // steeper (more overhead) on portrait screens
   let AZIM = (-38 * Math.PI) / 180; // more from the front on portrait screens
   const DRIFT = 0.3; // radians either side, about ±17°
+  // the pool's edge: where the camera stands, as a pose round a look-at point
+  const edge = { target: new THREE.Vector3(), dist: 10, polar: 1.5, azim: 0 };
   function frameScene(screenH: number) {
+    camera.fov = FOV; // the fit below is for the Lounge's lens
+    camera.updateProjectionMatrix();
     // corners of each piece's own box: much tighter than one box around all
     const boxes: THREE.Box3[] = [];
     for (const o of [...basin.children, ...scenery!.group.children]) {
@@ -279,6 +290,15 @@ export async function createLounge(
     // pull back past the diorama so the campus around it shows: the pond
     // stays the centrepiece, the campus fills the rest of the screen
     isoDist *= camera.aspect < 1 ? 1.3 : 1.4;
+    // standing a step back from the front-left corner, the rim in the
+    // foreground, looking down the pond's clear left side to the foot of the
+    // waterfall (the ramp crosses further right)
+    const eye = new THREE.Vector3(-W / 2 + Math.min(1.2, W * 0.15), RIM + EYE, DEPTH / 2 + 1.6);
+    edge.target.set(-W * 0.2 + 0.4, WATER_Y + 0.6, -DEPTH / 2 + 1.0);
+    const d = eye.clone().sub(edge.target);
+    edge.dist = d.length();
+    edge.polar = Math.acos(d.y / edge.dist);
+    edge.azim = Math.atan2(d.x, d.z);
     // fog swallows the campus's far edge, at any camera distance
     const fog = scene.fog as THREE.Fog;
     fog.near = Math.max(topDist + 4, isoDist * 0.95);
@@ -298,12 +318,20 @@ export async function createLounge(
   // exactly fills the screen (so it matches the flat background); at u=1 a
   // raised three-quarter view, pulled back, drifting slowly around the pond.
   const topDist = DEPTH / 2 / Math.tan(((FOV / 2) * Math.PI) / 180);
-  const target = new THREE.Vector3();
+  const target = new THREE.Vector3(), endTarget = new THREE.Vector3();
+  let view = 0, viewGoal = 0; // 0 the three-quarter view, 1 the pool's edge
   function placeCamera(s: number, time: number) {
-    // drift: a slow, uneven swing around the pond, inside ±DRIFT
+    // drift: a slow, uneven swing around the pond, inside ±DRIFT; at the edge,
+    // only a slow glance from side to side
     const drift = DRIFT * (0.72 * Math.sin(time * 0.045) + 0.28 * Math.sin(time * 0.017 + 1.3));
-    target.set(0, 0, 0).lerp(isoTarget, s);
-    poseCamera(target, lerp(topDist, isoDist, s), lerp(0, POLAR, s), lerp(0, AZIM + drift, s));
+    const glance = 0.06 * Math.sin(time * 0.11) + 0.03 * Math.sin(time * 0.047 + 2);
+    const v = smooth(view);
+    endTarget.copy(isoTarget).lerp(edge.target, v);
+    const dist = lerp(isoDist, edge.dist, v), polar = lerp(POLAR, edge.polar, v), azim = lerp(AZIM + drift, edge.azim + glance, v);
+    const fov = lerp(FOV, lerp(FOV, EDGE_FOV, v), s);
+    if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
+    target.set(0, 0, 0).lerp(endTarget, s);
+    poseCamera(target, lerp(topDist, dist, s), lerp(0, polar, s), lerp(0, azim, s));
   }
 
   // ── loop ─────────────────────────────────────────────────────────────────
@@ -324,8 +352,12 @@ export async function createLounge(
     const dt = Math.max(0, Math.min(0.25, (now - last) / 1000));
     last = now;
     const time = now / 1000;
-    if (reduced) u = goal;
-    else u = goal > u ? Math.min(goal, u + dt / TRANSITION_S) : Math.max(goal, u - dt / TRANSITION_S);
+    if (reduced) { u = goal; view = viewGoal; }
+    else {
+      u = goal > u ? Math.min(goal, u + dt / TRANSITION_S) : Math.max(goal, u - dt / TRANSITION_S);
+      // between the two views only while tilted: from flat, go straight to the right one
+      view = u === 0 ? viewGoal : viewGoal > view ? Math.min(viewGoal, view + dt / TRANSITION_S) : Math.max(viewGoal, view - dt / TRANSITION_S);
+    }
     u = Math.min(1, Math.max(0, u));
     const s = smooth(u);
 
@@ -417,6 +449,10 @@ export async function createLounge(
     setInLounge(on: boolean) {
       goal = on ? 1 : 0;
       start();
+    },
+    setEdgeView(on: boolean) {
+      viewGoal = on ? 1 : 0;
+      if (u === 0) view = viewGoal;
     },
     destroy() {
       stopped = true;
