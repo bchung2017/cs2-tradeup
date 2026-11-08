@@ -239,6 +239,11 @@ export async function createLounge(
       { image: scenery.paving.image, size: scenery.paving.size * k },
     );
     campus.group.scale.setScalar(1 / k);
+    // the lobby, inside the headquarters' podium: its glass front on the
+    // building's face (both in campus units)
+    const e = campus.entrance;
+    interior.lobby.position.set(e.x, e.y + 0.02, e.z - 15.05);
+    campus.group.add(interior.lobby);
     scene.add(campus.group);
     frameScene(h);
   }
@@ -359,56 +364,62 @@ export async function createLounge(
 
 
   // ── the tour: into the headquarters (homepage only) ──────────────────────
-  // "lounge:go" events (components/home/LoungeTour.tsx) ask for a stop: the
-  // plaza (the pool's edge), the lobby, or floor 1. The camera flies or rides
-  // there; "lounge:tour" events say where it is and whether it's moving.
+  // The lobby is part of the plaza: a room inside the headquarters' podium
+  // (built with the campus, below), its glass front the building's facade,
+  // its sliding doors opening as you come up to them. "lounge:go" events
+  // (components/home/LoungeTour.tsx) ask for a stop: the plaza (the pool's
+  // edge), the lobby, or floor 1. The camera walks there in one unbroken
+  // move (floor 1 is a ride in the elevator); "lounge:tour" events say where
+  // it is and whether it's moving.
   type Stop = "plaza" | "lobby" | "floor1";
   type Room = "lobby" | "office";
   type Pose = { p: THREE.Vector3; yaw: number; pitch: number };
-  const ROOM_AT: Record<Room, THREE.Vector3> = { lobby: new THREE.Vector3(0, -300, 0), office: new THREE.Vector3(0, -400, 0) };
-  let interior: Interior | null = null;
-  let where: "plaza" | Room = "plaza";
+  const interior: Interior = buildInterior();
+  interior.office.position.set(0, -300, 0); // out of sight: reached only by the elevator
+  interior.office.scale.setScalar(1 / POND_SCALE); // rooms are in campus units, like the lobby
+  interior.office.visible = false;
+  scene.add(interior.office);
+  // the rooms are shrunk to the world's scale: their lamps' reach and
+  // strength shrink with them, so they light the same
+  for (const room of [interior.lobby, interior.office]) room.traverse((o) => {
+    const l = o as THREE.PointLight;
+    if (l.isPointLight) { l.distance /= POND_SCALE; l.intensity /= Math.pow(POND_SCALE, l.decay); }
+  });
+  let where: "plaza" | Room = "plaza"; // the office is the only place apart
   let stop: Stop = "plaza";
   let ready = false; // standing at the pool's edge, free to go
   let move: { t0: number; dur: number; step(k: number, time: number): void; end(): void } | null = null;
-  const fader = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0, depthTest: false, depthWrite: false, fog: false }));
-  fader.position.z = -0.2;
-  fader.renderOrder = 999;
-  fader.visible = false;
-  camera.add(fader);
-  scene.add(camera);
-  const setFade = (a: number) => { fader.visible = a > 0.001; (fader.material as THREE.MeshBasicMaterial).opacity = Math.min(1, a); };
   const easeIO = (k: number) => { const t = Math.min(1, Math.max(0, k)); return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; };
   const seg = (t: number, a: number, b: number) => easeIO((t - a) / (b - a));
   const lerpAngle = (a: number, b: number, t: number) => { const d = ((((b - a + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) - Math.PI; return a + d * t; };
   const anglesTo = (from: THREE.Vector3, to: THREE.Vector3) => { const d = to.clone().sub(from); return { yaw: Math.atan2(d.z, d.x), pitch: Math.atan2(d.y, Math.hypot(d.x, d.z)) }; };
   const posed = (p: [number, number, number], look: [number, number, number]): Pose => ({ p: new THREE.Vector3(...p), ...anglesTo(new THREE.Vector3(...p), new THREE.Vector3(...look)) });
-  // poses in room-local units (the two rooms share the elevator's layout)
-  const LOBBY_ENTER = posed([0, 1.7, 13.6], [0, 2.6, -15]);
+  // poses in room units (the two rooms share the elevator's layout)
   const LOBBY_IDLE = posed([-2, 1.7, 7], [4, 2.8, -9]);
-  const LOBBY_EXIT = posed([0, 1.7, 13.6], [0, 1.7, 30]);
+  const LOBBY_IDLE_TALL = posed([0, 1.7, 9.5], [0, 4.2, -15]); // narrow screens: square on to the logo
   const ELEV_FRONT: Pose = { p: new THREE.Vector3(16.6, 1.7, -2), yaw: 0, pitch: 0 };
   const ELEV_CAR: Pose = { p: new THREE.Vector3(21.6, 1.7, -2), yaw: Math.PI, pitch: -0.03 };
   const OFFICE_IDLE = posed([13, 1.8, 6], [-1, 2.0, -15]);
-  // on a narrow screen, square on to each room's sign
-  const LOBBY_IDLE_TALL = posed([0, 1.7, 9.5], [0, 4.2, -15]);
   const OFFICE_IDLE_TALL = posed([9, 1.8, 11], [3.5, 2.2, -15]);
   const lobbyIdle = () => (camera.aspect < 1 ? LOBBY_IDLE_TALL : LOBBY_IDLE);
   const officeIdle = () => (camera.aspect < 1 ? OFFICE_IDLE_TALL : OFFICE_IDLE);
+  // room units → the world (both rooms are unrotated, scaled down uniformly)
+  const roomObj = (r: Room) => (r === "lobby" ? interior.lobby : interior.office);
+  const toWorld = (r: Room, v: THREE.Vector3) => { const o = roomObj(r); o.updateMatrixWorld(true); return v.clone().applyMatrix4(o.matrixWorld); };
   const pose: Pose = { p: new THREE.Vector3(), yaw: 0, pitch: 0 };
+  let poseRoom: Room | null = null; // what pose.p is relative to: a room, or the world
   const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
-  function applyPose(local: boolean) {
-    const p = local && where !== "plaza" ? tmpA.copy(pose.p).add(ROOM_AT[where]) : tmpA.copy(pose.p);
+  function applyPose() {
+    const p = poseRoom ? toWorld(poseRoom, pose.p) : tmpA.copy(pose.p);
     camera.up.set(0, 1, 0);
     camera.position.copy(p);
     tmpB.set(Math.cos(pose.yaw) * Math.cos(pose.pitch), Math.sin(pose.pitch), Math.sin(pose.yaw) * Math.cos(pose.pitch));
     camera.lookAt(tmpB.add(p));
   }
-  const lerpPose = (a: Pose, b: Pose, t: number, out = pose) => {
-    out.p.copy(a.p).lerp(b.p, t);
-    out.yaw = lerpAngle(a.yaw, b.yaw, t);
-    out.pitch = a.pitch + (b.pitch - a.pitch) * t;
-    return out;
+  const lerpPose = (a: Pose, b: Pose, t: number) => {
+    pose.p.copy(a.p).lerp(b.p, t);
+    pose.yaw = lerpAngle(a.yaw, b.yaw, t);
+    pose.pitch = a.pitch + (b.pitch - a.pitch) * t;
   };
   function emit(busy: boolean, extra: Record<string, unknown> = {}) {
     const detail = { stop, busy, ready, ...extra };
@@ -418,155 +429,145 @@ export async function createLounge(
   const fog = () => scene.fog as THREE.Fog;
   let fogKeep = { near: 0, far: 0 };
   function setWhere(w: "plaza" | Room) {
-    if (w === where) return;
-    if (where === "plaza") fogKeep = { near: fog().near, far: fog().far };
+    const apart = (x: string) => x === "office";
+    if (apart(w) && !apart(where)) { fogKeep = { near: fog().near, far: fog().far }; fog().near = 300; fog().far = 600; floorRenderer.setPaused(true); }
+    if (!apart(w) && apart(where)) { fog().near = fogKeep.near; fog().far = fogKeep.far; floorRenderer.setPaused(false); }
     where = w;
-    if (w === "plaza") { fog().near = fogKeep.near; fog().far = fogKeep.far; floorRenderer.setPaused(false); }
-    else { fog().near = 300; fog().far = 600; floorRenderer.setPaused(true); }
-  }
-  function ensureInterior() {
-    if (interior) return interior;
-    interior = buildInterior();
-    for (const r of ["lobby", "office"] as Room[]) { const g = interior[r]; g.position.copy(ROOM_AT[r]); scene.add(g); }
-    void renderer.compileAsync(interior.lobby, camera).catch(() => {});
-    void renderer.compileAsync(interior.office, camera).catch(() => {});
-    return interior;
   }
   // the pool's edge pose at `time`, without moving the camera for good
-  const edgeP = new THREE.Vector3(), edgeLook = new THREE.Vector3();
-  function edgePose(time: number) {
+  function edgePose(time: number): Pose {
     placeCamera(1, time);
-    edgeP.copy(camera.position);
-    edgeLook.copy(target);
-    return { p: edgeP, ...anglesTo(edgeP, edgeLook) };
+    const p = camera.position.clone();
+    return { p, ...anglesTo(p, target) };
   }
-  // the route over the waterfall to the front doors, in world units
-  function route() {
-    const k = campus!.group.scale.x, e = campus!.entrance.clone().multiplyScalar(k), f = scenery!.fall;
-    return {
-      over: new THREE.Vector3(f.x, f.top + 4, f.z + 1), // above the falls, clear of the bonsai
-      before: e.clone().add(new THREE.Vector3(0, 2.2, 3)), // high over the terrace in front
-      door: e.clone().add(new THREE.Vector3(0, 0.8, 0.7)),
-      inside: e.clone().add(new THREE.Vector3(0, 1.0, -6)),
-    };
+  // the walk between the pool's edge and the lobby, in world units: up over
+  // the rock and the waterfall, down across the plaza to the doors, inside
+  function walkway(edge: THREE.Vector3, inside: THREE.Vector3) {
+    const f = scenery!.fall, d = interior.frontDoor;
+    const L = (x: number, y: number, z: number) => toWorld("lobby", new THREE.Vector3(x, y, z));
+    return new THREE.CatmullRomCurve3([
+      edge,
+      new THREE.Vector3(f.x, f.top + 4.5, f.z + 1),
+      L(d.x, 9, d.z + 24),
+      L(d.x, 3.2, d.z + 11),
+      L(d.x, d.y, d.z + 3),
+      L(d.x, d.y, d.z - 2),
+      inside,
+    ], false, "centripetal");
   }
-  const bez = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, t: number, out: THREE.Vector3) => {
-    const m = 1 - t;
-    return out.set(0, 0, 0).addScaledVector(a, m * m * m).addScaledVector(b, 3 * m * m * t).addScaledVector(c, 3 * m * t * t).addScaledVector(d, t * t * t);
-  };
   const run = (dur: number, step: (k: number, time: number) => void, end: () => void) => {
     move = { t0: performance.now() / 1000, dur: reduced ? 0.01 : dur, step, end };
   };
-  function flyIn() {
-    const r = route(), from: Pose = { p: camera.position.clone(), ...anglesTo(camera.position, target) };
-    ensureInterior();
+  // follow a path, looking along it, turning to `endLook` at the end
+  function follow(path: THREE.CatmullRomCurve3, from: Pose, endLook: Pose, k: number) {
+    const u = easeIO(k);
+    path.getPointAt(u, pose.p);
+    const ahead = path.getPointAt(Math.min(1, u + 0.05));
+    const dir = anglesTo(pose.p, ahead.distanceTo(pose.p) > 1e-4 ? ahead : path.getPointAt(1));
+    dir.pitch = Math.max(-0.45, Math.min(0.25, dir.pitch));
+    const a = easeIO(Math.min(1, k / 0.15)), b = easeIO(Math.max(0, (k - 0.78) / 0.22));
+    pose.yaw = lerpAngle(lerpAngle(from.yaw, dir.yaw, a), endLook.yaw, b);
+    pose.pitch = from.pitch + (dir.pitch - from.pitch) * a;
+    pose.pitch += (endLook.pitch - pose.pitch) * b;
+  }
+  function walkIn() {
+    const from: Pose = { p: camera.position.clone(), ...anglesTo(camera.position, target) };
+    const idle = lobbyIdle(), inside = toWorld("lobby", idle.p);
+    const path = walkway(from.p, inside);
+    poseRoom = null;
     emit(true);
-    run(6, (k) => {
-      const e = easeIO(k);
-      bez(from.p, r.over, r.before, r.door, e, pose.p);
-      const to = anglesTo(pose.p, r.inside);
-      const lk = easeIO(Math.min(1, k * 1.5));
-      pose.yaw = lerpAngle(from.yaw, to.yaw, lk);
-      pose.pitch = from.pitch + (to.pitch - from.pitch) * lk;
-      setFade((k - 0.86) / 0.14);
-    }, () => {
+    run(9, (k) => follow(path, from, idle, k), () => {
+      poseRoom = "lobby";
+      pose.p.copy(idle.p); pose.yaw = idle.yaw; pose.pitch = idle.pitch;
       setWhere("lobby");
-      run(3.4, (k) => {
-        lerpPose(LOBBY_ENTER, lobbyIdle(), easeIO(k));
-        setFade(1 - k / 0.3);
-      }, () => { stop = "lobby"; setFade(0); emit(false); });
+      stop = "lobby";
+      emit(false);
     });
   }
-  function flyOut() {
+  function walkOut() {
+    const startW = toWorld("lobby", pose.p), from: Pose = { p: startW, yaw: pose.yaw, pitch: pose.pitch };
+    const dur = 9, end = edgePose(performance.now() / 1000 + dur);
+    const path = walkway(end.p, startW);
+    poseRoom = null;
+    setWhere("plaza");
     emit(true);
-    const start = { p: pose.p.clone(), yaw: pose.yaw, pitch: pose.pitch };
-    run(2.4, (k) => {
-      lerpPose(start, LOBBY_EXIT, easeIO(k));
-      setFade((k - 0.75) / 0.25);
-    }, () => {
-      setWhere("plaza");
-      const r = route();
-      const out = anglesTo(r.door, r.door.clone().add(new THREE.Vector3(0, -0.4, 10)));
-      run(5.5, (k, time) => {
-        const end = edgePose(time), e = easeIO(k);
-        bez(r.door, r.before, r.over, end.p, e, pose.p);
-        pose.yaw = lerpAngle(out.yaw, end.yaw, easeIO(Math.min(1, k * 1.3)));
-        pose.pitch = out.pitch + (end.pitch - out.pitch) * easeIO(k);
-        setFade(1 - k / 0.15);
-      }, () => { stop = "plaza"; setFade(0); emit(false); });
+    run(dur, (k) => follow({ getPointAt: (u: number, out?: THREE.Vector3) => path.getPointAt(1 - u, out) } as unknown as THREE.CatmullRomCurve3, from, end, k), () => {
+      stop = "plaza";
+      emit(false);
     });
   }
-  function ride(from: Room, to: Room, startPose: Pose, endPose: Pose, endStop: Stop, labels: [string, string]) {
-    const i = ensureInterior();
-    const start = { p: startPose.p.clone(), yaw: startPose.yaw, pitch: startPose.pitch };
-    i.setDoors(to, 0);
+  function ride(from: Room, to: Room, endPose: Pose, endStop: Stop, labels: [string, string]) {
+    const start = { p: pose.p.clone(), yaw: pose.yaw, pitch: pose.pitch };
+    interior.setDoors(to, 0);
     emit(true, { ride: { from: labels[0], to: labels[1] } });
     let switched = false;
+    poseRoom = from;
     run(12, (k, time) => {
       const t = k * 12;
       if (t < 2.4) lerpPose(start, ELEV_FRONT, seg(t, 0, 2.4));
-      else if (t < 3.4) { lerpPose(ELEV_FRONT, ELEV_FRONT, 0); i.setDoors(from, seg(t, 2.4, 3.4)); }
+      else if (t < 3.4) { lerpPose(ELEV_FRONT, ELEV_FRONT, 0); interior.setDoors(from, seg(t, 2.4, 3.4)); }
       else if (t < 5.2) {
-        i.setDoors(from, 1);
+        interior.setDoors(from, 1);
         const e = seg(t, 3.4, 5.2);
         pose.p.copy(ELEV_FRONT.p).lerp(ELEV_CAR.p, e);
         pose.yaw = Math.PI * e; // turn round to face the doors
         pose.pitch = ELEV_CAR.pitch * e;
       } else if (t < 8.6) {
         pose.p.copy(ELEV_CAR.p); pose.yaw = Math.PI; pose.pitch = ELEV_CAR.pitch;
-        i.setDoors(from, 1 - seg(t, 5.2, 6.2));
-        if (t > 7.4 && !switched) { switched = true; i.setDoors(from, 0); setWhere(to); }
+        interior.setDoors(from, 1 - seg(t, 5.2, 6.2));
+        // the switch happens behind closed doors
+        if (t > 7.4 && !switched) { switched = true; interior.setDoors(from, 0); setWhere(to); poseRoom = to; }
         pose.p.y += Math.sin(time * 30) * 0.004 * Math.min(1, (t - 6.2) * 2) * Math.min(1, (8.6 - t) * 2); // the ride's hum
       } else {
-        if (!switched) { switched = true; setWhere(to); }
-        i.setDoors(to, t < 10.8 ? seg(t, 8.6, 9.6) : 1 - seg(t, 10.8, 11.8));
+        if (!switched) { switched = true; setWhere(to); poseRoom = to; }
+        interior.setDoors(to, t < 10.8 ? seg(t, 8.6, 9.6) : 1 - seg(t, 10.8, 11.8));
         lerpPose(ELEV_CAR, endPose, seg(t, 9.6, 12));
       }
-    }, () => { i.setDoors(to, 0); stop = endStop; emit(false); });
+    }, () => { interior.setDoors(to, 0); stop = endStop; emit(false); });
   }
   function go(target: Stop) {
     if (move || !ready || target === stop) return;
-    if (stop === "plaza" && target === "lobby") flyIn();
-    else if (stop === "lobby" && target === "plaza") flyOut();
-    else if (stop === "lobby" && target === "floor1") ride("lobby", "office", pose, officeIdle(), "floor1", ["L", "1"]);
-    else if (stop === "floor1" && target === "lobby") ride("office", "lobby", pose, lobbyIdle(), "lobby", ["1", "L"]);
+    if (stop === "plaza" && target === "lobby") walkIn();
+    else if (stop === "lobby" && target === "plaza") walkOut();
+    else if (stop === "lobby" && target === "floor1") ride("lobby", "office", officeIdle(), "floor1", ["L", "1"]);
+    else if (stop === "floor1" && target === "lobby") ride("office", "lobby", lobbyIdle(), "lobby", ["1", "L"]);
   }
   const onGo = (e: Event) => go((e as CustomEvent<Stop>).detail);
   addEventListener("lounge:go", onGo);
-  // leaving the homepage mid-tour: straight back outside
+  // leaving the homepage mid-tour: straight back to the Lounge's own camera
   function resetTour() {
     move = null;
-    setFade(0);
+    poseRoom = null;
     setWhere("plaza");
-    if (interior) { interior.lobby.visible = interior.office.visible = false; }
+    interior.setFrontDoors(0);
     if (stop !== "plaza" || ready) { stop = "plaza"; ready = false; emit(false); }
   }
-  // each frame, after the plaza has updated: the tour's camera and rooms
+  // each frame, after the plaza has updated: the tour's camera, the rooms,
+  // the lobby's doors (they open for whoever comes near)
   function tourFrame(time: number) {
-    const inside = where !== "plaza";
-    if (inside) {
-      for (const o of [floor, water, basin, koi.group, scenery?.group, campus?.group]) if (o) o.visible = false;
-    }
-    if (interior) {
-      interior.lobby.visible = where === "lobby";
-      interior.office.visible = where === "office";
-      if (inside) interior.update(time);
-    }
+    const apart = where === "office";
+    if (apart) for (const o of [floor, water, basin, koi.group, scenery?.group, campus?.group]) if (o) o.visible = false;
+    interior.office.visible = apart;
+    interior.update(time);
+    let moved = false;
     if (move) {
       const k = Math.min(1, (time - move.t0) / move.dur);
       move.step(k, time);
       if (k >= 1) { const m = move; move = null; m.end(); }
-      applyPose(where !== "plaza");
-      return true;
-    }
-    if (stop === "lobby" || stop === "floor1") {
+      moved = true;
+    } else if (stop === "lobby" || stop === "floor1") {
       const idle = stop === "lobby" ? lobbyIdle() : officeIdle();
+      poseRoom = stop === "lobby" ? "lobby" : "office";
       pose.p.copy(idle.p); pose.p.y += Math.sin(time * 0.6) * 0.03;
       pose.yaw = idle.yaw + Math.sin(time * 0.13) * 0.06; pose.pitch = idle.pitch;
-      applyPose(true);
-      return true;
+      moved = true;
     }
-    return false; // at the pool's edge: the Lounge's own camera
+    if (moved) applyPose();
+    if (!apart) {
+      const d = toWorld("lobby", interior.frontDoor).distanceTo(camera.position) * POND_SCALE; // in lobby units
+      interior.setFrontDoors((9 - d) / 4);
+    }
+    return moved;
   }
 
   // ── loop ─────────────────────────────────────────────────────────────────
@@ -621,7 +622,7 @@ export async function createLounge(
     if (!atEdge && (ready || where !== "plaza" || move)) resetTour();
     if (atEdge && !ready && !move) { ready = true; emit(false); }
     if (!tourFrame(time)) placeCamera(s, time);
-    if (where === "plaza") koi.update(school.fish(), KOI_Y, camera.position, 1);
+    if (where !== "office") koi.update(school.fish(), KOI_Y, camera.position, 1);
     waterMat.uniforms.uCam.value.copy(camera.position);
     composer.render();
 
@@ -665,7 +666,9 @@ export async function createLounge(
   waterMat.uniforms.uReveal.value = 1;
   placeCamera(1, 0);
   koi.update(school.fish(), KOI_Y, camera.position, 1); // the fish's meshes exist before compiling
+  interior.office.visible = true; // compiled now, not mid-ride
   await renderer.compileAsync(scene, camera);
+  interior.office.visible = false;
   await step(0.92);
   // one hidden draw of the full scene: uploads textures and geometry to the
   // GPU now rather than on the first frame of the move
@@ -693,7 +696,7 @@ export async function createLounge(
     destroy() {
       stopped = true;
       removeEventListener("lounge:go", onGo);
-      interior?.dispose();
+      interior.dispose();
       if (covered) dispatchEvent(new CustomEvent("lounge:cover", { detail: false }));
       cancelAnimationFrame(raf);
       removeEventListener("resize", onResize);

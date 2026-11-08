@@ -4,8 +4,10 @@
 // facing into the room, the middle one in service), so a ride is the same
 // camera move in either room and the switch happens behind closed doors.
 //
-// Room-local units, about a metre each, floor at y = 0; the caller places
-// each room somewhere out of sight of the plaza. Lit by real lights (only
+// Room-local units, about a metre each, floor at y = 0. The lobby stands in
+// the plaza itself (the caller puts it inside the headquarters' podium): its
+// glass front is the building's facade, with sliding doors in the middle;
+// floor 1 is out of sight, reached only by the elevator. Lit by real lights (only
 // these rooms' materials use them).
 import * as THREE from "three";
 import { LOGO_ASPECT, makeSign } from "./loungeCampus";
@@ -15,6 +17,8 @@ export interface Interior {
   lobby: THREE.Group;
   office: THREE.Group;
   setDoors(room: "lobby" | "office", open: number): void;
+  setFrontDoors(open: number): void; // the lobby's sliding glass doors onto the plaza
+  frontDoor: THREE.Vector3; // their middle, at eye height, in lobby units
   update(time: number): void;
   dispose(): void;
 }
@@ -138,7 +142,7 @@ export function buildInterior(): Interior {
   const lobby = new THREE.Group();
   const LH = 9;
   const stoneFloor = std(0xffffff, {
-    roughness: 0.22, metalness: 0.15,
+    roughness: 0.55, metalness: 0,
     map: canvasTex(512, 512, (g) => {
       for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
         const v = 196 + Math.floor(hash(i, j) * 26);
@@ -152,20 +156,38 @@ export function buildInterior(): Interior {
   });
   const lobbyWall = std(0x3b423f, { roughness: 0.6 });
   const lobbyDoors = shell(lobby, LH, stoneFloor, lobbyWall, std(0x1c211f), "L");
-  // the glass front, with the plaza at night beyond it
+  // the glass front, onto the plaza, with sliding doors in the middle
+  const FD = 4.4, FH = 3.3; // the doorway
+  const frontDoors: THREE.Mesh[] = [];
   {
-    const glass = keep(new THREE.MeshStandardMaterial({ color: 0x9fd8c0, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0.2 }));
-    const pane = new THREE.Mesh(keep(new THREE.PlaneGeometry(40, LH)), glass);
-    pane.position.set(0, LH / 2, ROOM.z1);
-    pane.rotation.y = Math.PI;
-    lobby.add(pane);
+    const glass = keep(new THREE.MeshStandardMaterial({ color: 0x9fd8c0, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0.2, side: THREE.DoubleSide, depthWrite: false }));
+    const pane = (w: number, h: number, x: number, y: number) => {
+      const m = new THREE.Mesh(keep(new THREE.PlaneGeometry(w, h)), glass);
+      m.position.set(x, y, ROOM.z1);
+      lobby.add(m);
+    };
+    const side = (40 - FD) / 2;
+    pane(side, LH, -FD / 2 - side / 2, LH / 2);
+    pane(side, LH, FD / 2 + side / 2, LH / 2);
+    pane(FD, LH - FH, 0, FH + (LH - FH) / 2);
     const mull = std(0x1d2321, { metalness: 0.6, roughness: 0.4 });
-    for (let x = -20; x <= 20; x += 4) box(lobby, 0.12, LH, 0.2, mull, x, LH / 2, ROOM.z1);
-    box(lobby, 40, 0.15, 0.2, mull, 0, 3.4, ROOM.z1);
-    const out = new THREE.Mesh(keep(new THREE.PlaneGeometry(90, 26)), keep(new THREE.MeshBasicMaterial({ map: skyline, color: new THREE.Color(0.9, 1, 0.95) })));
-    out.position.set(0, 8, ROOM.z1 + 14);
-    out.rotation.y = Math.PI;
-    lobby.add(out);
+    for (let x = -20; x <= 20; x += 4) if (Math.abs(x) > FD / 2 + 0.3) box(lobby, 0.12, LH, 0.2, mull, x, LH / 2, ROOM.z1);
+    box(lobby, 40, 0.15, 0.2, mull, 0, FH + 0.07, ROOM.z1);
+    for (const sx of [-1, 1]) box(lobby, 0.16, FH, 0.24, mull, (sx * FD) / 2, FH / 2, ROOM.z1);
+    // the doors: two framed glass leaves that slide apart
+    const leafGlass = keep(new THREE.MeshStandardMaterial({ color: 0xbfe8d6, transparent: true, opacity: 0.2, roughness: 0.05, metalness: 0.2, side: THREE.DoubleSide, depthWrite: false }));
+    for (const sx of [-1, 1]) {
+      const leaf = new THREE.Mesh(keep(new THREE.PlaneGeometry(FD / 2, FH - 0.05)), leafGlass);
+      const frame = new THREE.LineSegments(keep(new THREE.EdgesGeometry(keep(new THREE.PlaneGeometry(FD / 2, FH - 0.05)))), keep(new THREE.LineBasicMaterial({ color: 0x6f7d77 })));
+      leaf.add(frame);
+      leaf.position.set((sx * FD) / 4, FH / 2, ROOM.z1 + 0.15);
+      leaf.userData.sx = sx;
+      lobby.add(leaf);
+      frontDoors.push(leaf);
+    }
+    // a mat inside the doors, and the canopy's light strip outside
+    box(lobby, FD + 1, 0.02, 2.2, std(0x1e2422), 0, 0.01, ROOM.z1 - 1.3);
+    box(lobby, FD + 2, 0.06, 0.06, glow(2.2, 2.0, 1.6), 0, FH + 0.4, ROOM.z1 + 0.25);
   }
   // the feature wall: warm wood slats behind the logo
   {
@@ -344,6 +366,11 @@ export function buildInterior(): Interior {
   return {
     lobby,
     office,
+    frontDoor: new THREE.Vector3(0, 1.7, ROOM.z1),
+    setFrontDoors(open) {
+      const k = Math.min(1, Math.max(0, open));
+      for (const d of frontDoors) d.position.x = (d.userData.sx * FD) / 4 + d.userData.sx * k * (FD / 2 - 0.1);
+    },
     setDoors(room, open) {
       const k = Math.min(1, Math.max(0, open));
       const [a, b] = doorsOf[room];

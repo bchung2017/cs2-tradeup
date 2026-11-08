@@ -32,7 +32,8 @@ export interface Campus {
   // the Venture Studios sign's corners, in the campus's own units: the
   // Lounge's camera keeps it in frame
   landmarks: THREE.Vector3[];
-  // the headquarters' front doors, at the foot of the podium (campus units)
+  // the middle of the headquarters' glass front, at ground level (campus
+  // units): where the lobby goes
   entrance: THREE.Vector3;
   update(time: number, s: number): void;
   dispose(): void;
@@ -356,6 +357,10 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
       spines.push({ pts, tan, w, end: p3, side });
     }
   }
+  // the way in: the headquarters' doors stand in the middle of the far side
+  // (see the building, below); nothing is placed in front of them
+  const DOOR_X = cx + HC * 0.08;
+  mark(rect(DOOR_X - 5, cz - HC, DOOR_X + 5, cz - HC + 10), HARD);
   // the direction things line up with near (x, z): the nearest walk, or a
   // sweep round the pond
   function flowAt(x: number, z: number) {
@@ -379,7 +384,12 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
   {
     const exit = spines.find((s) => s.side === 0);
     const TW = 18 + rand() * 6, SW = Math.min(12, TW - 6), TD = 5.5, TH = 2.2, STEPS = 8, RISE = TH / STEPS, RUN = 0.45;
-    const tx = Math.min(cx + HC - TW / 2 - 1, Math.max(cx - HC + TW / 2 + 1, exit ? exit.end[0] : cx + (rand() - 0.5) * HC));
+    let tx = Math.min(cx + HC - TW / 2 - 1, Math.max(cx - HC + TW / 2 + 1, exit ? exit.end[0] : cx + (rand() - 0.5) * HC));
+    // to one side of the headquarters' doors, not in front of them
+    if (Math.abs(tx - DOOR_X) < TW / 2 + 6) {
+      const right = DOOR_X + TW / 2 + 6, left = DOOR_X - TW / 2 - 6;
+      tx = right + TW / 2 + 1 < cx + HC ? right : left;
+    }
     const z0 = cz - HC, zf = z0 + TD;
     const stone = col(0x56625c), tread = col(0x75817a);
     terraceParts.push(shade(new THREE.BoxGeometry(TW, TH, TD).translate(tx, Y + TH / 2, z0 + TD / 2), stone));
@@ -694,8 +704,13 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
       ? [[-w / 2 + cut, -d / 2], [w / 2 - cut, -d / 2], [w / 2, -d / 2 + cut], [w / 2, d / 2 - cut], [w / 2 - cut, d / 2], [-w / 2 + cut, d / 2], [-w / 2, d / 2 - cut], [-w / 2, -d / 2 + cut]]
       : [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2]]).map(([u, v]) => [mx + u, mz + v] as P);
     const BW = 2 * HC * 0.92, BD = 30, PH = 12, BH = 112, IN = 2.5;
-    const front = cz - HC - 3, mx = cx + HC * 0.08, mz = front - BD / 2;
-    part(box(mx, mz, BW, BD, 0), Y, Y + PH, 1); // the podium
+    const front = cz - HC - 3, mx = DOOR_X, mz = front - BD / 2;
+    // the podium, round the lobby (loungeInterior.ts, placed by lounge3d.ts):
+    // a wing either side and a band above, the lobby's glass front between
+    const LW = 41.2, LHt = 9.3, wing = (BW - LW) / 2;
+    part(box(mx - LW / 2 - wing / 2, mz, wing, BD, 0), Y, Y + PH, 1);
+    part(box(mx + LW / 2 + wing / 2, mz, wing, BD, 0), Y, Y + PH, 1);
+    part(box(mx, mz, LW, BD, 0), Y + LHt, Y + PH, 1);
     part(box(mx, mz, BW - 2 * IN, BD - 2 * IN, 5), Y + PH, Y + BH, 0); // the tower
     part(box(mx, mz, BW * 0.7, BD * 0.6, 3), Y + BH, Y + BH + 9, 2); // the crown
     hq.x0 = mx - BW / 2; hq.x1 = mx + BW / 2; hq.z0 = front - BD; hq.z1 = front;
@@ -1160,24 +1175,6 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     const towers = new THREE.Group();
     towers.add(new THREE.Mesh(geo, mat));
     for (const sg of signs) towers.add(makeSign(sg, keep));
-    // the front doors: tall glass doors in a bright frame, lit warm from the lobby
-    {
-      const c = document.createElement("canvas");
-      c.width = 512; c.height = 256;
-      const g = c.getContext("2d")!;
-      const grd = g.createLinearGradient(0, 0, 0, 256);
-      grd.addColorStop(0, "#c9b98a"); grd.addColorStop(1, "#fff1c8");
-      g.fillStyle = grd; g.fillRect(0, 0, 512, 256);
-      g.fillStyle = "#1a201d";
-      g.fillRect(0, 0, 512, 14); g.fillRect(0, 0, 14, 256); g.fillRect(498, 0, 14, 256);
-      for (let i = 1; i < 4; i++) g.fillRect(i * 128 - 4, 14, 8, 242);
-      g.fillRect(0, 70, 512, 6);
-      const t = keep(new THREE.CanvasTexture(c));
-      t.colorSpace = THREE.SRGBColorSpace;
-      const doors = new THREE.Mesh(keep(new THREE.PlaneGeometry(10, 5.2)), keep(new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(1.25, 1.2, 1.1) })));
-      doors.position.set(entrance.x, Y + 2.6, entrance.z + 0.25);
-      towers.add(doors);
-    }
     towers.add(new THREE.LineSegments(keep(new THREE.EdgesGeometry(geo, 30)), keep(new THREE.LineBasicMaterial({ color: GREEN, transparent: true, opacity: 0.28 }))));
     group.add(towers);
     risers.push([towers, HC]);
