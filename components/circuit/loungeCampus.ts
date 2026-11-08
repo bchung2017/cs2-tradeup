@@ -32,6 +32,8 @@ export interface Campus {
   // the Venture Studios sign's corners, in the campus's own units: the
   // Lounge's camera keeps it in frame
   landmarks: THREE.Vector3[];
+  // the headquarters' front doors, at the foot of the podium (campus units)
+  entrance: THREE.Vector3;
   update(time: number, s: number): void;
   dispose(): void;
 }
@@ -187,7 +189,7 @@ const FOG_FRAG = `#include <fog_pars_fragment>`;
 // nothing and the gold, lifted a little past white, catches the bloom. Only
 // the logo's middle is used (the picture has wide black margins).
 const LOGO_RECT = { u: 180 / 1168, v: 1 - 630 / 784, w: 810 / 1168, h: 535 / 784 };
-const LOGO_ASPECT = 810 / 535; // the crop's width over height, in pixels
+export const LOGO_ASPECT = 810 / 535; // the crop's width over height, in pixels
 const SIGN_FRAG = /* glsl */ `
   uniform sampler2D map; uniform vec4 rect; uniform float gain;
   varying vec2 vUv;
@@ -196,7 +198,7 @@ const SIGN_FRAG = /* glsl */ `
     gl_FragColor = vec4(c * gain, 1.0);
     #include <colorspace_fragment>
   }`;
-function makeSign(sg: { x: number; y: number; z: number; w: number; h: number; kind: "logo" | "dik" }, keep: <T extends { dispose(): void }>(x: T) => T) {
+export function makeSign(sg: { x: number; y: number; z: number; w: number; h: number; kind: "logo" | "dik" }, keep: <T extends { dispose(): void }>(x: T) => T) {
   let tex: THREE.Texture, rect: THREE.Vector4, gain: number;
   if (sg.kind === "logo") {
     tex = keep(new THREE.TextureLoader().load("/lounge/venture-studios.png"));
@@ -677,6 +679,7 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
   const towerParts: THREE.BufferGeometry[] = [];
   const signs: { x: number; y: number; z: number; w: number; h: number; kind: "logo" | "dik" }[] = [];
   const hq = { x0: 0, x1: 0, z0: 0, z1: 0 }; // its footprint, kept clear of the other towers
+  const entrance = new THREE.Vector3();
   {
     let id = 0;
     const part = (poly: P[], y0: number, y1: number, type: number) => {
@@ -696,6 +699,7 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     part(box(mx, mz, BW - 2 * IN, BD - 2 * IN, 5), Y + PH, Y + BH, 0); // the tower
     part(box(mx, mz, BW * 0.7, BD * 0.6, 3), Y + BH, Y + BH + 9, 2); // the crown
     hq.x0 = mx - BW / 2; hq.x1 = mx + BW / 2; hq.z0 = front - BD; hq.z1 = front;
+    entrance.set(mx, Y, front);
     // the signs on the tower's face: the logo, high enough to clear the
     // waterfall rock from the pool's edge, and the division line right under it
     const SW = Math.min(BW * 0.62, 40), SH = SW / LOGO_ASPECT;
@@ -1156,6 +1160,24 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
     const towers = new THREE.Group();
     towers.add(new THREE.Mesh(geo, mat));
     for (const sg of signs) towers.add(makeSign(sg, keep));
+    // the front doors: tall glass doors in a bright frame, lit warm from the lobby
+    {
+      const c = document.createElement("canvas");
+      c.width = 512; c.height = 256;
+      const g = c.getContext("2d")!;
+      const grd = g.createLinearGradient(0, 0, 0, 256);
+      grd.addColorStop(0, "#c9b98a"); grd.addColorStop(1, "#fff1c8");
+      g.fillStyle = grd; g.fillRect(0, 0, 512, 256);
+      g.fillStyle = "#1a201d";
+      g.fillRect(0, 0, 512, 14); g.fillRect(0, 0, 14, 256); g.fillRect(498, 0, 14, 256);
+      for (let i = 1; i < 4; i++) g.fillRect(i * 128 - 4, 14, 8, 242);
+      g.fillRect(0, 70, 512, 6);
+      const t = keep(new THREE.CanvasTexture(c));
+      t.colorSpace = THREE.SRGBColorSpace;
+      const doors = new THREE.Mesh(keep(new THREE.PlaneGeometry(10, 5.2)), keep(new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(1.25, 1.2, 1.1) })));
+      doors.position.set(entrance.x, Y + 2.6, entrance.z + 0.25);
+      towers.add(doors);
+    }
     towers.add(new THREE.LineSegments(keep(new THREE.EdgesGeometry(geo, 30)), keep(new THREE.LineBasicMaterial({ color: GREEN, transparent: true, opacity: 0.28 }))));
     group.add(towers);
     risers.push([towers, HC]);
@@ -1168,6 +1190,7 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
   return {
     group,
     landmarks,
+    entrance,
     update(time, s) {
       group.visible = s > 0.002;
       // rise into place: the court first, the towers last

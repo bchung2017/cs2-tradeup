@@ -537,3 +537,41 @@ input:focus { box-shadow: 0 0 0 1px var(--green-dim); }
 /* The site is the Lounge alone for now (app/layout.tsx): no nav rail, so
    nothing reserves its height. Remove this to bring the rail back. */
 :root { --rail-h: 0px; }
+
+/* ── the homepage tour (components/home/LoungeTour.tsx) ───────────────── */
+.tour { position: fixed; inset: 0; z-index: 5; pointer-events: none; font-family: var(--mono); }
+.tour button { pointer-events: auto; }
+.tour-actions { position: absolute; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.tour-btn {
+  font: 500 14px var(--mono); letter-spacing: 0.08em; color: var(--fg); background: rgba(2, 5, 7, 0.7);
+  border: 1px solid var(--green-dim); padding: 10px 16px; cursor: pointer; backdrop-filter: blur(4px);
+}
+.tour-btn:hover { border-color: var(--green); color: var(--green); }
+.tour-btn--main { color: #000; background: var(--green); border-color: var(--green); box-shadow: 0 0 18px rgba(51, 255, 51, 0.35); }
+.tour-btn--main:hover { color: #000; filter: brightness(1.1); }
+.tour-where { position: absolute; left: 16px; top: calc(14px + env(safe-area-inset-top)); font-size: 11px; letter-spacing: 0.16em; color: var(--green); background: rgba(2, 5, 7, 0.55); padding: 6px 10px; border: 1px solid rgba(51, 255, 51, 0.25); }
+.tour-indicator {
+  position: absolute; left: 50%; top: calc(18px + env(safe-area-inset-top)); transform: translateX(-50%);
+  font-size: 28px; color: var(--green); background: rgba(0, 0, 0, 0.75); border: 1px solid var(--green-dim); padding: 6px 18px;
+  text-shadow: 0 0 10px rgba(51, 255, 51, 0.7); font-variant-numeric: tabular-nums;
+}
+.tour-indicator span { font-size: 18px; vertical-align: 3px; }
+.tour-panel {
+  pointer-events: auto; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(380px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px); overflow: auto; background: rgba(6, 10, 9, 0.94); border: 1px solid var(--green-dim);
+  box-shadow: 0 0 0 1px rgba(51, 255, 51, 0.12), 0 18px 60px rgba(0, 0, 0, 0.8); padding: 14px;
+}
+.tour-panel__head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 11px; letter-spacing: 0.16em; color: var(--green); }
+.tour-panel__x { background: none; border: none; color: var(--fg-dim); font-size: 20px; cursor: pointer; line-height: 1; }
+.tour-floors { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.tour-floor {
+  aspect-ratio: 1; border-radius: 50%; border: 1px solid #2b322f; background: #0d1210; color: #4b5651;
+  font: 500 14px var(--mono); cursor: not-allowed;
+}
+.tour-floor.is-open { border-color: var(--green); color: var(--green); cursor: pointer; box-shadow: 0 0 10px rgba(51, 255, 51, 0.3); }
+.tour-floor.is-open:hover:not(:disabled) { background: var(--green); color: #000; }
+.tour-floor.is-here { background: rgba(51, 255, 51, 0.15); cursor: default; }
+.tour-floor--lobby { grid-column: 3; }
+.tour-legend { list-style: none; margin: 12px 0 0; padding: 0; font-size: 12px; color: var(--fg); display: flex; flex-direction: column; gap: 4px; }
+.tour-legend b { color: var(--green); display: inline-block; width: 18px; }
+.tour-legend .dim { color: var(--fg-dim); }

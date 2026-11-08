@@ -18,6 +18,7 @@ const DIM_GREEN = 0x19a019;
 export interface Scenery {
   group: THREE.Group;
   impact: THREE.Vector2; // where the waterfall meets the water (x, z)
+  fall: { x: number; z: number; top: number; w: number }; // the falling sheet: centre x, lip z, top y, width
   paving: { image: HTMLCanvasElement; size: number }; // the patio's flagstone tile and the world units it covers
   update(time: number, s: number): void;
   dispose(): void;
@@ -576,6 +577,7 @@ export function buildScenery(W: number, D: number, rim: number, waterY: number):
   return {
     group,
     impact,
+    fall: { x: fallX, z: lipZ, top: fallTop, w: fallW },
     paving: { image: flagTex.image as HTMLCanvasElement, size: FLAG_W },
     update(time, s) {
       group.visible = s > 0.002;
