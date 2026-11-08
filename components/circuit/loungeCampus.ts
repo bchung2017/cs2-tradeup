@@ -185,60 +185,188 @@ function flat(p: P[], y: number) {
 const FOG_VERT = `#include <fog_pars_vertex>`;
 const FOG_FRAG = `#include <fog_pars_fragment>`;
 
-// The building's signs. The Venture Studios logo (public/lounge/
-// venture-studios.png) is gold on black: drawn additively, the black adds
-// nothing and the gold, lifted a little past white, catches the bloom. Only
-// the logo's middle is used (the picture has wide black margins).
-const LOGO_RECT = { u: 180 / 1168, v: 1 - 630 / 784, w: 810 / 1168, h: 535 / 784 };
-export const LOGO_ASPECT = 810 / 535; // the crop's width over height, in pixels
-const SIGN_FRAG = /* glsl */ `
-  uniform sampler2D map; uniform vec4 rect; uniform float gain;
+// The building's signs, as physical signage.
+//   logo   channel letters: the Venture Studios logo's gold shapes (public/
+//          lounge/venture-studios.png) traced from the picture and extruded,
+//          standing off the wall: a lit gold face carrying the picture's own
+//          gold, darker metal returns, a soft glow
+//   dik    a Broadway-style LED ticker: "A DIK Industries division" and the
+//          DIK Industries rabbit scrolling across a dot-matrix screen in a
+//          dark bezel
+// Only the logo's middle is used (the picture has wide black margins).
+const LOGO_PX = { x: 180, y: 154, w: 810, h: 535, W: 1168, H: 784 };
+export const LOGO_ASPECT = LOGO_PX.w / LOGO_PX.h;
+const LOGO_DEPTH = 0.022; // the letters' depth, as a share of the sign's width
+
+// The logo's gold shapes, as outlines in crop pixels (y down): the outer
+// edges and their holes, sorted out by nesting. Traced once and shared.
+type Loop = [number, number][];
+let logoShapes: Promise<{ outer: Loop; holes: Loop[] }[]> | null = null;
+function traceLogo() {
+  if (logoShapes) return logoShapes;
+  logoShapes = new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => {
+      const S = 1, GW = Math.floor(LOGO_PX.w / S), GH = Math.floor(LOGO_PX.h / S);
+      const c = document.createElement("canvas");
+      c.width = GW; c.height = GH;
+      const g = c.getContext("2d", { willReadFrequently: true })!;
+      g.drawImage(img, LOGO_PX.x, LOGO_PX.y, LOGO_PX.w, LOGO_PX.h, 0, 0, GW, GH);
+      const px = g.getImageData(0, 0, GW, GH).data;
+      // gold, not the faint rays round the peak
+      const on = (x: number, y: number) => x >= 0 && y >= 0 && x < GW && y < GH && Math.max(px[(y * GW + x) * 4], px[(y * GW + x) * 4 + 1]) > 120;
+      type V = [number, number];
+      const segs: [V, V][] = [];
+      for (let y = -1; y < GH; y++) for (let x = -1; x < GW; x++) {
+        const k = (on(x, y) ? 1 : 0) | (on(x + 1, y) ? 2 : 0) | (on(x + 1, y + 1) ? 4 : 0) | (on(x, y + 1) ? 8 : 0);
+        if (k === 0 || k === 15) continue;
+        const T: V = [x + 0.5, y], R: V = [x + 1, y + 0.5], B: V = [x + 0.5, y + 1], L: V = [x, y + 0.5];
+        const table: Record<number, [V, V][]> = { 1: [[L, T]], 2: [[T, R]], 3: [[L, R]], 4: [[R, B]], 5: [[L, T], [R, B]], 6: [[T, B]], 7: [[L, B]],
+          8: [[B, L]], 9: [[T, B]], 10: [[T, R], [B, L]], 11: [[R, B]], 12: [[R, L]], 13: [[T, R]], 14: [[L, T]] };
+        for (const sg of table[k]) segs.push(sg);
+      }
+      const key = (p: V) => p[0] * 4096 + p[1];
+      const adj = new Map<number, number[]>();
+      segs.forEach((sg, i) => { for (const p of sg) { const kk = key(p); if (!adj.has(kk)) adj.set(kk, []); adj.get(kk)!.push(i); } });
+      const used = new Uint8Array(segs.length), loops: Loop[] = [];
+      for (let i = 0; i < segs.length; i++) {
+        if (used[i]) continue;
+        used[i] = 1;
+        const loop: Loop = [segs[i][0]];
+        let cur = segs[i][1];
+        while (key(cur) !== key(loop[0])) {
+          loop.push(cur);
+          const next = (adj.get(key(cur)) ?? []).find((n) => !used[n]);
+          if (next === undefined) break;
+          used[next] = 1;
+          cur = key(segs[next][0]) === key(cur) ? segs[next][1] : segs[next][0];
+        }
+        if (loop.length > 6) loops.push(loop);
+      }
+      const simplify = (pts: Loop, eps: number): Loop => {
+        if (pts.length < 3) return pts;
+        let idx = 0, dmax = 0;
+        const p = pts[0], q = pts[pts.length - 1];
+        for (let i = 1; i < pts.length - 1; i++) {
+          const dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1;
+          const d = Math.abs(dy * pts[i][0] - dx * pts[i][1] + q[0] * p[1] - q[1] * p[0]) / l;
+          if (d > dmax) { dmax = d; idx = i; }
+        }
+        if (dmax <= eps) return [p, q];
+        return [...simplify(pts.slice(0, idx + 1), eps).slice(0, -1), ...simplify(pts.slice(idx), eps)];
+      };
+      const areaOf = (p: Loop) => Math.abs(p.reduce((sum, q, i) => { const n = p[(i + 1) % p.length]; return sum + q[0] * n[1] - n[0] * q[1]; }, 0) / 2);
+      const inside = (p: Loop, x: number, y: number) => {
+        let ins = false;
+        for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > y) !== (p[j][1] > y) && x < ((p[j][0] - p[i][0]) * (y - p[i][1])) / (p[j][1] - p[i][1]) + p[i][0]) ins = !ins;
+        return ins;
+      };
+      const simple = loops
+        .map((l) => { const mid = Math.floor(l.length / 2); return [...simplify(l.slice(0, mid + 1), 0.45).slice(0, -1), ...simplify(l.slice(mid), 0.45).slice(0, -1)] as Loop; })
+        .filter((l) => l.length >= 3 && areaOf(l) > 6)
+        .sort((a, b) => areaOf(b) - areaOf(a));
+      // nesting: a loop inside an even number of others is an outer edge
+      const parent = simple.map((l, i) => { for (let j = i - 1; j >= 0; j--) if (inside(simple[j], l[0][0], l[0][1])) return j; return -1; });
+      const depth = parent.map(function d(this: void, p: number): number { return p < 0 ? 0 : 1 + d(parent[p]); });
+      const out: { outer: Loop; holes: Loop[] }[] = [];
+      const at = new Map<number, number>();
+      simple.forEach((l, i) => {
+        if (depth[i] % 2 === 0) { at.set(i, out.length); out.push({ outer: l, holes: [] }); }
+        else if (at.has(parent[i])) out[at.get(parent[i])!].holes.push(l);
+      });
+      res(out);
+    };
+    img.onerror = () => rej(new Error("logo failed to load"));
+    img.src = "/lounge/venture-studios.png";
+  });
+  return logoShapes;
+}
+
+// every ticker's material, for update(time) to scroll
+const tickers = new Set<THREE.ShaderMaterial>();
+export function updateSigns(time: number) {
+  for (const m of tickers) m.uniforms.time.value = time;
+}
+
+const TICKER_FRAG = /* glsl */ `
+  uniform sampler2D map; uniform float time; uniform vec2 dots; uniform float rep;
   varying vec2 vUv;
   void main() {
-    vec3 c = texture2D(map, rect.xy + vUv * rect.zw).rgb;
-    gl_FragColor = vec4(c * gain, 1.0);
+    vec2 g = vUv * dots, cell = floor(g), f = fract(g) - 0.5;
+    // which part of the message is under this LED, scrolling right to left
+    float u = fract((cell.x + 0.5) / dots.x * rep + time * 0.06);
+    float on = texture2D(map, vec2(u, (cell.y + 0.5) / dots.y)).r;
+    float led = 1.0 - smoothstep(0.26, 0.4, length(f));
+    vec3 lit = vec3(1.0, 0.86, 0.6) * 3.2, off = vec3(0.07, 0.05, 0.035);
+    vec3 c = mix(vec3(0.012), mix(off, lit, on), led);
+    gl_FragColor = vec4(c, 1.0);
     #include <colorspace_fragment>
   }`;
+
 export function makeSign(sg: { x: number; y: number; z: number; w: number; h: number; kind: "logo" | "dik" }, keep: <T extends { dispose(): void }>(x: T) => T) {
-  let tex: THREE.Texture, rect: THREE.Vector4, gain: number;
+  const group = new THREE.Group();
+  group.position.set(sg.x, sg.y, sg.z);
   if (sg.kind === "logo") {
-    tex = keep(new THREE.TextureLoader().load("/lounge/venture-studios.png"));
-    rect = new THREE.Vector4(LOGO_RECT.u, LOGO_RECT.v, LOGO_RECT.w, LOGO_RECT.h);
-    gain = 1.6;
+    // channel letters, built once the picture is traced
+    const tex = keep(new THREE.TextureLoader().load("/lounge/venture-studios.png"));
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 8;
+    const face = keep(new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: new THREE.Color(1.25, 1.2, 1.1), metalness: 0.55, roughness: 0.32, fog: false }));
+    const side = keep(new THREE.MeshStandardMaterial({ color: 0x5c4420, emissive: 0x2a1c08, metalness: 0.85, roughness: 0.35, fog: false }));
+    void traceLogo().then((shapes) => {
+      const k = sg.w / LOGO_PX.w, depth = sg.w * LOGO_DEPTH;
+      const v = ([x, y]: [number, number]) => new THREE.Vector2(x * k - sg.w / 2, sg.h / 2 - y * k);
+      const all = shapes.map(({ outer, holes }) => {
+        const shape = new THREE.Shape(outer.map(v));
+        for (const h of holes) shape.holes.push(new THREE.Path(h.map(v)));
+        return shape;
+      });
+      const geo = keep(new THREE.ExtrudeGeometry(all, { depth, bevelEnabled: true, bevelThickness: depth * 0.12, bevelSize: depth * 0.06, bevelSegments: 1, curveSegments: 1 }));
+      // the face carries the picture's own gold, where it sat in the picture
+      const p = geo.attributes.position, uv = geo.attributes.uv;
+      for (let i = 0; i < p.count; i++) {
+        uv.setXY(i, (LOGO_PX.x + (p.getX(i) + sg.w / 2) / k) / LOGO_PX.W, 1 - (LOGO_PX.y + (sg.h / 2 - p.getY(i)) / k) / LOGO_PX.H);
+      }
+      group.add(new THREE.Mesh(geo, [face, side]));
+    }).catch(() => {});
   } else {
-    // the DIK Industries white rabbit (public/lounge/dik-rabbit.svg), then
-    // "A DIK Industries division", in white
+    // the ticker: a dark bezel, an LED screen scrolling the message
+    const H = 64, msg = "A DIK INDUSTRIES DIVISION";
     const c = document.createElement("canvas");
-    c.width = 1024; c.height = 128;
+    const g0 = c.getContext("2d")!;
+    g0.font = "700 46px Arial, Helvetica, sans-serif";
+    const tw = Math.ceil(g0.measureText(msg).width), rw = 70, gap = 70;
+    c.width = rw + 24 + tw + gap; c.height = H;
     const g = c.getContext("2d")!;
-    g.fillStyle = "#ffffff";
-    g.font = "500 52px Georgia, 'Times New Roman', serif";
-    g.textBaseline = "middle";
-    g.textAlign = "center";
-    g.fillText("A DIK INDUSTRIES DIVISION", 600, 66);
-    const canvasTex = keep(new THREE.CanvasTexture(c));
-    const rabbit = new Image();
-    rabbit.onload = () => {
-      const h = 100, w = (h * 100) / 77.8; // the mark's viewBox is 100 x 77.8
-      g.drawImage(rabbit, 60, 64 - h / 2, w, h);
-      canvasTex.needsUpdate = true;
+    const draw = (rabbit?: HTMLImageElement) => {
+      g.fillStyle = "#000"; g.fillRect(0, 0, c.width, H);
+      g.fillStyle = "#fff"; g.font = "700 46px Arial, Helvetica, sans-serif"; g.textBaseline = "middle";
+      g.fillText(msg, rw + 24, H / 2 + 2);
+      if (rabbit) g.drawImage(rabbit, 4, 6, rw - 8, ((rw - 8) * 77.8) / 100 * 1.05);
     };
+    draw();
+    const tex = keep(new THREE.CanvasTexture(c));
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.minFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    const rabbit = new Image();
+    rabbit.onload = () => { draw(rabbit); tex.needsUpdate = true; };
     rabbit.src = "/lounge/dik-rabbit.svg";
-    tex = canvasTex;
-    rect = new THREE.Vector4(0, 0, 1, 1);
-    gain = 1.05;
+    const rows = 18, cols = Math.round((rows * sg.w) / sg.h);
+    const stripAspect = c.width / H;
+    const mat = keep(new THREE.ShaderMaterial({
+      uniforms: { map: { value: tex }, time: { value: 0 }, dots: { value: new THREE.Vector2(cols, rows) }, rep: { value: sg.w / sg.h / stripAspect } },
+      vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: TICKER_FRAG,
+    }));
+    tickers.add(mat);
+    const screen = new THREE.Mesh(keep(new THREE.PlaneGeometry(sg.w, sg.h)), mat);
+    screen.position.z = 0.06 * sg.h + 0.01;
+    const bezel = new THREE.Mesh(keep(new THREE.BoxGeometry(sg.w + sg.h * 0.24, sg.h * 1.24, sg.h * 0.12)),
+      keep(new THREE.MeshStandardMaterial({ color: 0x15181a, metalness: 0.6, roughness: 0.4, fog: false })));
+    group.add(bezel, screen);
   }
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  const mat = keep(new THREE.ShaderMaterial({
-    uniforms: { map: { value: tex }, rect: { value: rect }, gain: { value: gain } },
-    vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: SIGN_FRAG,
-    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-  }));
-  const m = new THREE.Mesh(keep(new THREE.PlaneGeometry(sg.w, sg.h)), mat);
-  m.position.set(sg.x, sg.y, sg.z);
-  return m;
+  return group;
 }
 
 // `diorama`: the pond with its rock and patio, which the plaza surrounds;
@@ -1193,6 +1321,7 @@ export function buildCampus(diorama: Bounds, basin: Bounds, rim: number, seed: n
       // rise into place: the court first, the towers last
       for (const [o, r] of risers) o.scale.y = Math.max(0.001, ease((s - 0.15 - Math.min(0.35, r / 200)) / 0.5));
       if (waterMat) waterMat.uniforms.uTime.value = time;
+      updateSigns(time);
     },
     dispose() {
       for (const d of disposables) d.dispose();
